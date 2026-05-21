@@ -1,66 +1,66 @@
 # 🦷 AutomaDent — Sistema Multiagente para Clínica Dental
 
-Sistema Multiagente (SMA) con arquitectura **Hub-and-Spoke** para automatizar la operación de una clínica dental mediante un bot de Telegram.
+Sistema Multiagente (SMA) con arquitectura **Hub-and-Spoke** para automatizar la operación de una clínica dental mediante un bot de Telegram y un Dashboard Administrativo Web.
 
-## 🏗️ Arquitectura
+## 🏗️ Arquitectura del Sistema
 
 ```
-📱 Telegram Bot (main.py)
-    │
-    ▼
-🧠 Agente Supervisor ──► Clasifica la intención del mensaje
-    │
-    ├──► 📋 Agente Recepción     → Registro, citas, disponibilidad
-    ├──► 🩺 Agente Asist. Médico → Cierre clínico, evoluciones
-    └──► 💰 Agente Facturación   → Pagos y cobros
-    
-⏰ Notificador (notifier.py) → Alertas proactivas vía Cron
+                        📱 Telegram Bot (main.py)
+                                  │
+                                  ▼
+      🧠 Agente Supervisor (Clasifica y valida roles en Supabase)
+                                  │
+          ┌───────────────────────┼───────────────────────┐
+          ▼                       ▼                       ▼
+    📋 Recepción            🩺 Asist. Médico        💰 Facturación
+(Registro, Citas,           (Diagnósticos y         (Cobros y Pagos)
+ Google Sheets)              Evoluciones)
+          │                       │                       │
+          └───────────────────────┼───────────────────────┘
+                                  ▼
+                     ☁️ Supabase / 📊 Google Sheets
+                                  ▲
+                                  │
+                   💻 Dashboard Streamlit (dashboard.py)
+                    (Citas, Historias Clínicas, Finanzas)
 ```
 
-## 📁 Estructura de Archivos
+## 📂 Estructura del Código
 
-| Archivo | Descripción |
-|---|---|
-| `database.py` | Cliente Supabase centralizado (singleton) |
-| `tools.py` | 7 herramientas CRUD con seguridad por `chat_id` |
-| `agents.py` | Grafo LangGraph con 4 agentes + system prompts |
-| `main.py` | Bot de Telegram (Polling) |
-| `notifier.py` | Alertas proactivas (Cron standalone) |
-| `schema.sql` | Esquema SQL de referencia (ya desplegado en Supabase) |
+- `database.py`: Cliente de base de datos Supabase centralizado (singleton).
+- `tools.py`: 8 herramientas CRUD con control de acceso basado en roles (RBAC) e integración nativa con Google Sheets.
+- `agents.py`: Cerebro del SMA con LangGraph.
+- `main.py`: Integración del bot de Telegram con ruteo de seguridad por `chat_id`.
+- `notifier.py`: Envío de recordatorios automáticos de citas (Cron).
+- `dashboard.py`: Aplicación Streamlit para la visualización administrativa.
+- `credentials.json`: Credenciales de la Cuenta de Servicio de Google (excluida de git).
 
-## 🛠️ Tecnologías
+## ⚙️ Configuración de Roles y Seguridad (RBAC)
 
-- **Python** 3.13.7
-- **LangChain** + **LangGraph** — Orquestación multiagente
-- **Google Gemini** (gemini-2.0-flash) — LLM
-- **Supabase** (PostgreSQL) — Base de datos
-- **python-telegram-bot** — Integración con Telegram
-- **httpx** — Cliente HTTP async para notificaciones
+Para evitar que los pacientes accedan a diagnósticos médicos o reportes de facturación, el bot de Telegram identifica el rol del usuario utilizando su `chat_id` único:
 
-## ⚡ Instalación
+1. **Pacientes**: Su `chat_id` debe registrarse en la tabla `pacientes` (columna `telefono`). Solo pueden ver su propio historial y agendar sus citas.
+2. **Personal (Doctores, Recepcionistas, Administradores)**: Su `chat_id` debe registrarse en la tabla `personal` (columna `telefono`) junto a su rol respectivo (`rol_personal`: 'odontologo', 'recepcionista', 'administrador').
+   - *Odontólogo*: Puede registrar diagnósticos y evoluciones de citas.
+   - *Recepcionista / Administrador*: Puede cobrar citas, registrar pagos y exportar reportes de citas a Excel (Google Sheets).
 
+> [!TIP]
+> Puedes vincular y registrar fácilmente los `chat_id` de Telegram de tu personal clínico en la sección **Registro del Personal** dentro del Dashboard de Streamlit.
+
+## 🚀 Instalación y Uso
+
+### 1. Preparar Entorno Virtual e Instalar Dependencias
 ```bash
-# 1. Clonar el repositorio
-git clone <tu-repo-url>
-cd Proyecto-Automa-Dent
-
-# 2. Crear entorno virtual
+# Crear entorno virtual
 python -m venv venv
-
-# 3. Activar entorno virtual
-# Windows:
 venv\Scripts\activate
-# Linux/Mac:
-source venv/bin/activate
 
-# 4. Instalar dependencias
+# Instalar librerías
 pip install -r requirements.txt
 ```
 
-## ⚙️ Configuración
-
-Crear un archivo `.env` en la raíz del proyecto:
-
+### 2. Configurar Archivo `.env`
+Crea un archivo `.env` en la raíz del proyecto:
 ```env
 TELEGRAM_BOT_TOKEN=tu_token_de_telegram
 GEMINI_API_KEY=tu_api_key_de_gemini
@@ -68,55 +68,26 @@ SUPABASE_SERVICE_KEY=tu_service_key_de_supabase
 SUPABASE_URL=https://tu-proyecto.supabase.co
 ```
 
-## 🚀 Ejecución
+### 3. Configurar Credenciales de Google Sheets
+Coloca tu archivo de credenciales de Google Cloud (`credentials.json`) en la raíz del proyecto para habilitar la exportación automática de citas.
 
-### Bot de Telegram (principal)
+---
+
+### 💻 Ejecutar Dashboard de Streamlit
+El dashboard administrativo se abre en tu navegador local para ver todas las citas, expedientes clínicos de pacientes y estados de cobro:
+```bash
+streamlit run dashboard.py
+```
+> **Contraseña de acceso por defecto**: `dent123`
+
+### 🤖 Ejecutar Bot de Telegram
+Arranca el bot de Telegram en modo interactivo:
 ```bash
 python main.py
 ```
 
-### Notificador proactivo (Cron)
+### ⏰ Ejecutar Recordatorios Automáticos (Cron)
 ```bash
-# Ambas alertas
+# Ambos reportes (citas de hoy para doctores y recordatorios de mañana para pacientes)
 python notifier.py
-
-# Solo alertas a doctores (citas del día)
-python notifier.py --doctores
-
-# Solo recordatorios a pacientes (citas de mañana)
-python notifier.py --recordatorios
 ```
-
-### Cron (Linux)
-```bash
-# Alertas a doctores — todos los días a las 7:00 AM
-0 7 * * * cd /ruta/proyecto && python notifier.py --doctores
-
-# Recordatorios a pacientes — todos los días a las 7:00 PM
-0 19 * * * cd /ruta/proyecto && python notifier.py --recordatorios
-```
-
-## 🗄️ Base de Datos
-
-6 tablas en Supabase (PostgreSQL):
-
-- **pacientes** — Clientes de la clínica (`telefono` = chat_id de Telegram)
-- **personal** — Odontólogos, recepcionistas, administradores
-- **citas** — Reservas (flujo: programada → confirmada → asistida)
-- **historias_clinicas** — Expediente maestro (1:1 con pacientes)
-- **atenciones_medicas** — Evoluciones por cita asistida
-- **pagos** — Registro financiero (1:1 con citas)
-
-## 🤖 Agentes
-
-| Agente | Rol | Herramientas |
-|---|---|---|
-| **Supervisor** | Router de intenciones | Ninguna (solo clasifica) |
-| **Recepción** | Onboarding & Booking | `crear_paciente_y_historia`, `consultar_disponibilidad_agenda`, `agendar_cita`, `consultar_historial_paciente` |
-| **Asist. Médico** | Cierre clínico | `actualizar_estado_cita`, `registrar_evolucion_medica` |
-| **Facturación** | Cobros & Recibos | `registrar_pago` |
-| **Notificador** | Alertas proactivas | `alertar_doctores_citas_dia`, `recordar_pacientes_citas` |
-
-## 📜 Licencia
-
-Proyecto académico — Uso educativo.
