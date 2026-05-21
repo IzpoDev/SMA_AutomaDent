@@ -1,0 +1,9 @@
+langchain
+langchain-core
+langchain-google-genai
+langgraph
+supabase
+python-telegram-bot
+python-dotenv
+httpx
+tzdata
