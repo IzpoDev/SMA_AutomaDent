@@ -33,38 +33,50 @@ def _notificar_paciente(paciente_id: int, mensaje: str) -> None:
     """Envía un mensaje directo al paciente en Telegram cuando cambia el estado de su cita."""
     bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
     if not bot_token:
+        print("[NOTIF PACIENTE] ❌ TELEGRAM_BOT_TOKEN no configurado.")
         return
     pac = supabase.table("pacientes").select("telefono").eq("id", paciente_id).limit(1).execute()
     if not pac.data:
+        print(f"[NOTIF PACIENTE] ⚠️ Paciente ID {paciente_id} no encontrado en BD.")
         return
     chat_id = pac.data[0]["telefono"]
     try:
-        requests.post(
+        resp = requests.post(
             f"https://api.telegram.org/bot{bot_token}/sendMessage",
             json={"chat_id": chat_id, "text": mensaje, "parse_mode": "HTML"},
             timeout=5
         )
-    except Exception:
-        pass
+        if resp.status_code == 200:
+            print(f"[NOTIF PACIENTE] ✅ Mensaje enviado al chat_id {chat_id}.")
+        else:
+            print(f"[NOTIF PACIENTE] ❌ Telegram respondió {resp.status_code}: {resp.text}")
+    except Exception as e:
+        print(f"[NOTIF PACIENTE] ❌ Excepción al enviar a {chat_id}: {e}")
 
 
 def _notificar_odontologo(odontologo_id: int, mensaje: str) -> None:
     """Envía un mensaje directo al odontólogo en Telegram cuando se le asigna una nueva cita."""
     bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
     if not bot_token:
+        print("[NOTIF ODONTÓLOGO] ❌ TELEGRAM_BOT_TOKEN no configurado.")
         return
     doc = supabase.table("personal").select("telefono").eq("id", odontologo_id).limit(1).execute()
     if not doc.data or not doc.data[0].get("telefono"):
+        print(f"[NOTIF ODONTÓLOGO] ⚠️ Odontólogo ID {odontologo_id} sin chat_id (telefono) en BD.")
         return
     chat_id = doc.data[0]["telefono"]
     try:
-        requests.post(
+        resp = requests.post(
             f"https://api.telegram.org/bot{bot_token}/sendMessage",
             json={"chat_id": chat_id, "text": mensaje, "parse_mode": "HTML"},
             timeout=5
         )
-    except Exception:
-        pass
+        if resp.status_code == 200:
+            print(f"[NOTIF ODONTÓLOGO] ✅ Mensaje enviado al chat_id {chat_id}.")
+        else:
+            print(f"[NOTIF ODONTÓLOGO] ❌ Telegram respondió {resp.status_code}: {resp.text}")
+    except Exception as e:
+        print(f"[NOTIF ODONTÓLOGO] ❌ Excepción al enviar a {chat_id}: {e}")
 
 
 # ==============================================================================
@@ -423,14 +435,22 @@ def actualizar_estado_cita(
         telegram_chat_id: ID de Telegram.
         user_role: Rol del usuario.
         cita_id: ID de la cita.
-        nuevo_estado: Nuevo estado ('confirmada', 'asistida', 'cancelada', 'no_show').
+        nuevo_estado: Estado destino. Valores válidos: 'confirmada', 'asistida' (o 'atendida'), 'cancelada', 'no_show'.
     """
     if user_role not in ["odontologo", "recepcionista", "administrador"]:
         return "❌ Acceso Denegado. Solo el personal de la clínica puede cambiar el estado de las citas."
 
+    # Alias: 'atendida' → 'asistida' (valor correcto en el ENUM de Supabase)
+    if nuevo_estado == "atendida":
+        nuevo_estado = "asistida"
+
+    estados_validos = {"programada", "confirmada", "asistida", "cancelada", "no_show"}
+    if nuevo_estado not in estados_validos:
+        return f"❌ Estado inválido '{nuevo_estado}'. Usa: {', '.join(estados_validos)}."
+
     cita = (
         supabase.table("citas")
-        .select("id, estado")
+        .select("id, estado, paciente_id")
         .eq("id", cita_id)
         .limit(1)
         .execute()
@@ -534,7 +554,7 @@ def registrar_pago(
         monto: Monto cobrado en Soles (S/).
         metodo_pago: Método de pago ('efectivo', 'tarjeta', 'yape', 'plin').
     """
-    if user_role not in ["administrador", "recepcionista"]:
+    if user_role not in ["administrador", "recepcionista", "odontologo"]:
         return "❌ Acceso Denegado. Solo personal administrativo puede registrar pagos."
 
     cita = (

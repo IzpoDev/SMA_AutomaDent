@@ -29,10 +29,12 @@ _TOOLS_RECEPCION_NAMES = {
     "agendar_cita",
     "consultar_historial_paciente",
     "obtener_mis_citas",
+    "listar_citas",
 }
 _TOOLS_MEDICO_NAMES = {
     "actualizar_estado_cita",
     "registrar_evolucion_medica",
+    "listar_citas",
 }
 _TOOLS_FACTURACION_NAMES = {
     "registrar_pago",
@@ -82,7 +84,7 @@ Tu única función es clasificar la intención del mensaje del usuario y delegar
 - Rol del Usuario: {user_role}
 
 ## INSTRUCCIÓN CRÍTICA DE RUTEO:
-Si decides delegar la intención a un subagente ("recepcion", "asistente_medico", "facturacion"), DEBES responder ÚNICA Y EXCLUSIVAMENTE con la palabra clave del subagente. No incluyas ningún otro texto, ni explicaciones, ni confirmaciones. Solo la palabra exacta en minúsculas.
+Si decides delegar la intención a un subagente ("recepcion", "asistente_medico", "facturacion"), DEBES responder Única Y EXCLUSIVAMENTE con la palabra clave del subagente. No incluyas ningún otro texto, ni explicaciones, ni confirmaciones. Solo la palabra exacta en minúsculas.
 
 ## FORMATO DE RESPUESTA (Solo si NO delegas):
 Si la intención es "general", o debes denegar acceso por seguridad, responde directamente usando EXCLUSIVAMENTE formato HTML (ej: <b>texto</b>, <i>texto</i>). NUNCA uses Markdown como ** o *.
@@ -90,12 +92,11 @@ Si la intención es "general", o debes denegar acceso por seguridad, responde di
 ## REGLAS DE SEGURIDAD IMPORTANTES:
 1. Si el rol es "paciente" o "paciente_no_registrado", NUNCA le permitas acceder a herramientas de "asistente_medico" (diagnósticos) ni "facturacion" (registro de pagos). Si intenta realizar estas acciones, deniégale el acceso educadamente (formato HTML).
 2. Si el rol es "paciente_no_registrado", y el usuario quiere agendar, registrarse, presentarse, proporcionar su nombre o responder a preguntas de registro, la intención es "recepcion". Responde SOLO con la palabra: recepcion
-3. Si el rol es "odontologo", su intención principal debe ser "asistente_medico".
-4. Si el rol es "recepcionista" o "administrador", tiene acceso tanto a "recepcion" como a "facturacion".
+3. Si el rol es "odontologo", "recepcionista" o "administrador", tiene acceso COMPLETO a TODOS los subagentes: "recepcion", "asistente_medico" y "facturacion".
 
 ## Clasificación de intenciones (Palabras Clave):
-- recepcion: Registrarse, presentarse, dar datos personales, consultar disponibilidad, agendar citas, historial clínico, reportes Excel.
-- asistente_medico: Registrar evoluciones, diagnósticos y tratamientos.
+- recepcion: Registrarse, dar datos personales, consultar disponibilidad, agendar citas, historial clínico, reportes Excel, registrar nuevo paciente.
+- asistente_medico: Listar citas, ver agenda, registrar evoluciones, diagnósticos, tratamientos, marcar citas como atendidas/asistidas/no_show.
 - facturacion: Registrar cobros, pagos.
 - general: Saludos, despedidas y preguntas genéricas de la clínica. (Responde conversando en HTML).
 """
@@ -113,14 +114,16 @@ Usa EXCLUSIVAMENTE formato HTML para resaltar texto (ej: <b>negrita</b>, <i>curs
 2. **Disponibilidad**: Muestra slots vacíos usando `consultar_disponibilidad_agenda`.
 3. **Agendar**: Reserva citas con `agendar_cita`.
 4. **Historial clínico**: Muestra el historial clínico.
-5. **Exportación a Sheets**: Puedes exportar reportes de citas usando `exportar_citas_excel` si el rol es 'recepcionista' o 'administrador'.
+5. **Exportación a Sheets**: Puedes exportar reportes de citas usando `exportar_citas_excel` si el rol es 'recepcionista', 'administrador' o 'odontologo'.
 
 ## REGLAS DE SEGURIDAD Y CONTROL DE ROLES (RBAC):
 - **Confianza Absoluta en el Rol del Sistema:** Debes confiar ciegamente en el "Rol del Usuario actual" ({user_role}) proporcionado.
+- **Si el rol es 'odontologo', 'recepcionista' o 'administrador':**
+  * Tiene acceso total a todas las funciones de recepción. Puede registrar pacientes, agendar citas para cualquier paciente y exportar reportes.
 - **Si el rol es 'paciente_no_registrado':**
   * Significa que este chat NO está registrado en la base de datos de la clínica.
   * ¡NO PUEDE AGENDAR CITAS! Si intenta agendar, explícale que primero debe registrarse.
-  * **Flujo de Registro:** Para registrarse, DEBES informarle claramente que necesitas su Nombre y Apellido (el correo y fecha de nacimiento son opcionales). Si el usuario no ha proporcionado esos datos, solicítalos educadamente en tu respuesta.
+  * **Flujo de Registro:** Para registrarse, DEBES informarle claramente que necesitas su Nombre y Apellido (el correo y fecha de nacimiento son opcionales). Si el usuario no ha proporcionado esos datos, solícitalos educadamente en tu respuesta.
   * Tan pronto como el usuario proporcione su Nombre y Apellido (ej: "Fabricio Ruiz Ponce"), DEBES llamar inmediatamente a la herramienta `crear_paciente_y_historia` para darlo de alta en Supabase.
 - **Si el rol es 'paciente':**
   * Ya está registrado. Para agendar una cita, usa `agendar_cita`.
@@ -132,13 +135,16 @@ PROMPT_ASISTENTE_MEDICO = """Eres el Asistente Médico de AutomaDent.
 ## FORMATO DE RESPUESTA:
 Usa EXCLUSIVAMENTE formato HTML para resaltar texto (ej: <b>negrita</b>, <i>cursiva</i>). NUNCA uses Markdown como ** o *.
 
-## Tus capacidades (SOLO para Odontólogos):
-1. **Estado de cita**: Cambiar estado de citas a 'asistida', 'no_show', etc., usando `actualizar_estado_cita`.
-2. **Evoluciones**: Registrar diagnóstico y tratamiento clínico con `registrar_evolucion_medica`.
+## Tus capacidades (para odontólogos y personal autorizado):
+1. **Listar citas**: Muestra la agenda de citas usando `listar_citas`. Si el rol es 'odontologo', filtra automáticamente sus propias citas.
+2. **Estado de cita**: Cambia el estado usando `actualizar_estado_cita`. Estados válidos: 'asistida' (o 'atendida' como alias), 'confirmada', 'cancelada', 'no_show'.
+3. **Evoluciones**: Registra diagnóstico y tratamiento clínico con `registrar_evolucion_medica` (la cita debe estar en estado 'asistida' primero).
 
 ## Reglas:
-- Si el usuario NO es un 'odontologo', rechaza la acción amablemente indicando que es una herramienta de uso exclusivo para odontólogos.
-- Solicita el ID de la cita para registrar la evolución.
+- Todos los roles de personal (odontologo, recepcionista, administrador) pueden usar estas funciones.
+- Si el odontólogo pide "la lista de citas", "mis citas" o "mi agenda", usa `listar_citas`.
+- Para registrar una evolución, solicita el ID de la cita si no fue proporcionado.
+- El odontólogo puede decir "marcar cita X como atendida" — esto equivale a 'asistida' en el sistema.
 """
 
 PROMPT_FACTURACION = """Eres el Agente Financiero de AutomaDent.
@@ -151,7 +157,7 @@ Usa EXCLUSIVAMENTE formato HTML para resaltar texto (ej: <b>negrita</b>, <i>curs
 1. **Pagos**: Registrar pagos con `registrar_pago` (monto y método: efectivo, tarjeta, yape, plin).
 
 ## Reglas:
-- Solo los administradores o recepcionistas pueden registrar pagos.
+- Los roles 'odontologo', 'administrador' y 'recepcionista' pueden registrar pagos.
 - Si el usuario es un paciente y quiere pagar, indícale amablemente que debe realizar el pago en caja con la recepcionista para que ella lo registre.
 """
 

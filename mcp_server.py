@@ -44,37 +44,50 @@ def _notificar_paciente(paciente_id: int, mensaje: str) -> None:
     """Envía un mensaje Telegram al paciente cuando cambia el estado de su cita."""
     bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
     if not bot_token:
+        print("[NOTIF PACIENTE] ❌ TELEGRAM_BOT_TOKEN no configurado.")
         return
     pac = supabase.table("pacientes").select("telefono").eq("id", paciente_id).limit(1).execute()
     if not pac.data:
+        print(f"[NOTIF PACIENTE] ⚠️ Paciente ID {paciente_id} no encontrado en BD.")
         return
+    chat_id = pac.data[0]["telefono"]
     try:
-        requests.post(
+        resp = requests.post(
             f"https://api.telegram.org/bot{bot_token}/sendMessage",
-            json={"chat_id": pac.data[0]["telefono"], "text": mensaje, "parse_mode": "HTML"},
+            json={"chat_id": chat_id, "text": mensaje, "parse_mode": "HTML"},
             timeout=5,
         )
-    except Exception:
-        pass
+        if resp.status_code == 200:
+            print(f"[NOTIF PACIENTE] ✅ Mensaje enviado al chat_id {chat_id}.")
+        else:
+            print(f"[NOTIF PACIENTE] ❌ Telegram respondió {resp.status_code}: {resp.text}")
+    except Exception as e:
+        print(f"[NOTIF PACIENTE] ❌ Excepción al enviar a {chat_id}: {e}")
 
 
 def _notificar_odontologo(odontologo_id: int, mensaje: str) -> None:
     """Envía un mensaje directo al odontólogo en Telegram cuando se le asigna una nueva cita."""
     bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
     if not bot_token:
+        print("[NOTIF ODONTÓLOGO] ❌ TELEGRAM_BOT_TOKEN no configurado.")
         return
     doc = supabase.table("personal").select("telefono").eq("id", odontologo_id).limit(1).execute()
     if not doc.data or not doc.data[0].get("telefono"):
+        print(f"[NOTIF ODONTÓLOGO] ⚠️ Odontólogo ID {odontologo_id} sin chat_id (telefono) en BD.")
         return
     chat_id = doc.data[0]["telefono"]
     try:
-        requests.post(
+        resp = requests.post(
             f"https://api.telegram.org/bot{bot_token}/sendMessage",
             json={"chat_id": chat_id, "text": mensaje, "parse_mode": "HTML"},
             timeout=5,
         )
-    except Exception:
-        pass
+        if resp.status_code == 200:
+            print(f"[NOTIF ODONTÓLOGO] ✅ Mensaje enviado al chat_id {chat_id}.")
+        else:
+            print(f"[NOTIF ODONTÓLOGO] ❌ Telegram respondió {resp.status_code}: {resp.text}")
+    except Exception as e:
+        print(f"[NOTIF ODONTÓLOGO] ❌ Excepción al enviar a {chat_id}: {e}")
 
 
 # ==============================================================================
@@ -379,10 +392,18 @@ def actualizar_estado_cita(
         telegram_chat_id: ID de Telegram.
         user_role: Rol del usuario.
         cita_id: ID de la cita.
-        nuevo_estado: 'confirmada', 'asistida', 'cancelada' o 'no_show'.
+        nuevo_estado: Estado destino. Válidos: 'confirmada', 'asistida' (o 'atendida'), 'cancelada', 'no_show'.
     """
     if user_role not in ["odontologo", "recepcionista", "administrador"]:
         return "❌ Acceso denegado. Solo el personal de la clínica puede cambiar el estado de las citas."
+
+    # Alias: 'atendida' → 'asistida' (valor correcto en el ENUM de Supabase)
+    if nuevo_estado == "atendida":
+        nuevo_estado = "asistida"
+
+    estados_validos = {"programada", "confirmada", "asistida", "cancelada", "no_show"}
+    if nuevo_estado not in estados_validos:
+        return f"❌ Estado inválido '{nuevo_estado}'. Usa: {', '.join(estados_validos)}."
 
     cita = (
         supabase.table("citas")
@@ -485,7 +506,7 @@ def registrar_pago(
         monto: Monto en Soles.
         metodo_pago: 'efectivo', 'tarjeta', 'yape' o 'plin'.
     """
-    if user_role not in ["administrador", "recepcionista"]:
+    if user_role not in ["administrador", "recepcionista", "odontologo"]:
         return "❌ Solo el personal administrativo puede registrar pagos."
 
     cita = (
@@ -542,20 +563,42 @@ def listar_pacientes(limite: int = 50) -> str:
 
 @mcp.tool()
 def listar_citas(
+    telegram_chat_id: str,
+    user_role: str,
     fecha: str = "",
     estado: str = "",
     limite: int = 30,
 ) -> str:
-    """Lista citas de la clínica con filtros opcionales.
+    """Lista citas de la clínica con filtros opcionales y control de acceso por rol.
+    Los odontólogos solo ven sus propias citas. Recepcionistas y administradores ven todas.
 
     Args:
+        telegram_chat_id: ID de Telegram del usuario que consulta.
+        user_role: Rol del usuario ('odontologo', 'recepcionista', 'administrador').
         fecha: Filtrar por fecha YYYY-MM-DD (opcional).
         estado: Filtrar por estado: 'programada', 'confirmada', 'asistida', 'cancelada', 'no_show' (opcional).
         limite: Máximo de registros (default: 30).
     """
+    if user_role == "paciente" or user_role == "paciente_no_registrado":
+        return "❌ Acceso denegado. Esta función es exclusiva para el personal de la clínica."
+
     query = supabase.table("citas").select(
         "id, fecha_hora, estado, motivo_consulta, paciente_id, odontologo_id"
     )
+
+    # RBAC: los odontólogos solo ven sus propias citas
+    if user_role == "odontologo":
+        doc = (
+            supabase.table("personal")
+            .select("id")
+            .eq("telefono", telegram_chat_id)
+            .eq("rol", "odontologo")
+            .limit(1)
+            .execute()
+        )
+        if not doc.data:
+            return "❌ No se encontró tu perfil de odontólogo en la base de datos. Verifica que tu Telegram Chat ID esté registrado."
+        query = query.eq("odontologo_id", doc.data[0]["id"])
 
     if fecha:
         try:
@@ -567,9 +610,12 @@ def listar_citas(
             return "❌ Formato de fecha inválido. Usa YYYY-MM-DD."
 
     if estado:
+        # Alias: 'atendida' → 'asistida'
+        if estado == "atendida":
+            estado = "asistida"
         query = query.eq("estado", estado)
 
-    citas = query.order("fecha_hora", desc=True).limit(limite).execute()
+    citas = query.order("fecha_hora", desc=False).limit(limite).execute()
 
     if not citas.data:
         return "📭 No se encontraron citas con esos filtros."
@@ -579,7 +625,7 @@ def listar_citas(
     doc_map = {d["id"]: f"{d['nombre']} {d['apellido']}" for d in
                (supabase.table("personal").select("id, nombre, apellido").execute().data or [])}
 
-    lineas = [f"📅 Citas encontradas ({len(citas.data)}):"]
+    lineas = [f"📅 Citas encontradas ({len(citas.data)}) para {user_role}:"]
     for c in citas.data:
         dt = datetime.fromisoformat(c["fecha_hora"])
         lineas.append(
