@@ -7,6 +7,7 @@
 # ==============================================================================
 
 import os
+import re
 import sys
 import asyncio
 import logging
@@ -155,6 +156,18 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
 
 
+def _sanitize_html(text: str) -> str:
+    """Convierte HTML al subconjunto que acepta Telegram (elimina ul/ol/li, h1-h6, p, br)."""
+    text = re.sub(r"<li>", "• ", text)
+    text = re.sub(r"</li>", "\n", text)
+    text = re.sub(r"</?ul>|</?ol>", "", text)
+    text = re.sub(r"<h[1-6][^>]*>(.*?)</h[1-6]>", r"<b>\1</b>\n", text, flags=re.IGNORECASE | re.DOTALL)
+    text = re.sub(r"<br\s*/?>", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"</?p>", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = str(update.effective_chat.id)
     texto = update.message.text
@@ -170,7 +183,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             user_role=rol,
             mensaje=texto,
         )
-        await update.message.reply_text(respuesta, parse_mode="HTML")
+        await update.message.reply_text(_sanitize_html(respuesta), parse_mode="HTML")
         logger.info(f"✅ Respuesta enviada a {chat_id}")
 
     except Exception as e:
