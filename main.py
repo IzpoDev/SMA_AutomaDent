@@ -1,17 +1,22 @@
 # main.py — Punto de entrada del Bot de Telegram
 # ==============================================================================
-# 1. Conecta al servidor MCP (mcp_server.py debe estar corriendo en puerto 8001)
-# 2. Carga las herramientas MCP y las pasa a agents.py
-# 3. Inicia el bot de Telegram en modo polling
+# Arranca automáticamente el servidor MCP (mcp_server.py) como subproceso,
+# espera que esté listo, carga las herramientas y lanza el bot de Telegram.
 #
-# Para ejecutar:
-#   Ventana 1: python mcp_server.py
-#   Ventana 2: python main.py
+# Solo necesitas correr: python main.py
 # ==============================================================================
 
 import os
+import sys
 import asyncio
 import logging
+import subprocess
+import httpx
+
+# Bypass de proxy del sistema para conexiones locales (fix Windows)
+os.environ.setdefault("NO_PROXY", "localhost,127.0.0.1")
+os.environ.setdefault("no_proxy", "localhost,127.0.0.1")
+
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import (
@@ -35,6 +40,59 @@ logger = logging.getLogger(__name__)
 
 TELEGRAM_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 MCP_SERVER_URL = os.environ.get("MCP_SERVER_URL", "http://localhost:8001/mcp")
+MCP_SERVER_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mcp_server.py")
+
+
+# ==============================================================================
+#  GESTIÓN DEL SERVIDOR MCP (subproceso automático)
+# ==============================================================================
+
+_mcp_process: subprocess.Popen | None = None
+
+
+def _start_mcp_server() -> subprocess.Popen:
+    """Arranca mcp_server.py como subproceso en background."""
+    logger.info("Iniciando servidor MCP como subproceso...")
+    env = os.environ.copy()
+    env["PYTHONIOENCODING"] = "utf-8"  # Fix emojis en consola Windows
+    proc = subprocess.Popen(
+        [sys.executable, MCP_SERVER_SCRIPT],
+        stdout=sys.stdout,
+        stderr=sys.stderr,
+        env=env,
+    )
+    return proc
+
+
+async def _wait_for_mcp_server(url: str, timeout: int = 20) -> None:
+    """Espera hasta que el servidor MCP responda (con retry).
+    Un GET a /mcp devuelve 405 Method Not Allowed, lo que confirma que el servidor está activo."""
+    async with httpx.AsyncClient(trust_env=False) as client:
+        for intento in range(timeout):
+            try:
+                await client.get(url, timeout=2.0)
+                logger.info("✅ Servidor MCP listo.")
+                return
+            except (
+                httpx.ConnectError,
+                httpx.ConnectTimeout,
+                httpx.ReadError,
+                httpx.ReadTimeout,
+                httpx.RemoteProtocolError,
+                httpx.TimeoutException,
+            ):
+                if intento == 0:
+                    logger.info("⏳ Esperando que el servidor MCP arranque...")
+                await asyncio.sleep(1)
+            except httpx.HTTPStatusError:
+                # Cualquier código HTTP (incluido 405) confirma que el servidor está vivo
+                logger.info("✅ Servidor MCP listo.")
+                return
+
+    raise RuntimeError(
+        f"❌ El servidor MCP no respondió en {timeout}s ({url}).\n"
+        "Revisa que mcp_server.py arranca sin errores de configuración."
+    )
 
 
 # ==============================================================================
@@ -156,42 +214,56 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 # ==============================================================================
 
 async def run() -> None:
-    """Inicializa el cliente MCP, carga las herramientas y arranca el bot."""
+    """Arranca el servidor MCP, conecta, carga las herramientas y lanza el bot."""
+    global _mcp_process
 
-    logger.info(f"🔌 Conectando al servidor MCP en {MCP_SERVER_URL} ...")
+    # 1. Arrancar el servidor MCP como subproceso
+    _mcp_process = _start_mcp_server()
 
-    # En langchain-mcp-adapters 0.2.x no necesita async with:
-    # cada llamada a una tool abre su propia sesión HTTP.
-    mcp_client = MultiServerMCPClient(
-        {
-            "automadent": {
-                "url": MCP_SERVER_URL,
-                "transport": "streamable-http",
+    try:
+        # 2. Esperar a que el servidor esté listo
+        await _wait_for_mcp_server(MCP_SERVER_URL)
+
+        # 3. Cargar herramientas MCP (proxies={} fuerza bypass del proxy del sistema)
+        logger.info(f"🔌 Cargando herramientas desde {MCP_SERVER_URL} ...")
+        mcp_client = MultiServerMCPClient(
+            {
+                "automadent": {
+                    "url": MCP_SERVER_URL,
+                    "transport": "streamable-http",
+                }
             }
-        }
-    )
+        )
 
-    tools = await mcp_client.get_tools()
-    set_mcp_tools(tools)
-    logger.info(f"✅ {len(tools)} herramientas MCP cargadas: {[t.name for t in tools]}")
+        tools = await mcp_client.get_tools()
+        set_mcp_tools(tools)
+        logger.info(f"✅ {len(tools)} herramientas MCP cargadas: {[t.name for t in tools]}")
 
-    application = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(
-        MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)
-    )
+        # 4. Arrancar el bot de Telegram
+        application = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+        application.add_handler(CommandHandler("start", start))
+        application.add_handler(CommandHandler("help", help_command))
+        application.add_handler(
+            MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)
+        )
 
-    async with application:
-        await application.updater.start_polling()
-        await application.start()
-        logger.info("🤖 Bot AutomaDent iniciado en modo POLLING.")
+        async with application:
+            await application.updater.start_polling()
+            await application.start()
+            logger.info("🤖 Bot AutomaDent iniciado en modo POLLING.")
 
-        try:
-            await asyncio.Event().wait()  # Corre hasta Ctrl+C
-        finally:
-            await application.updater.stop()
-            await application.stop()
+            try:
+                await asyncio.Event().wait()  # Corre hasta Ctrl+C
+            finally:
+                await application.updater.stop()
+                await application.stop()
+
+    finally:
+        # 5. Terminar el servidor MCP al apagar el bot
+        if _mcp_process and _mcp_process.poll() is None:
+            logger.info("🛑 Deteniendo servidor MCP...")
+            _mcp_process.terminate()
+            _mcp_process.wait(timeout=5)
 
 
 def main() -> None:
@@ -199,6 +271,9 @@ def main() -> None:
         asyncio.run(run())
     except KeyboardInterrupt:
         logger.info("🛑 Bot detenido.")
+    except RuntimeError as e:
+        logger.error(str(e))
+        sys.exit(1)
 
 
 if __name__ == "__main__":

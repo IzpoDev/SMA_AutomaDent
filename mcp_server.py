@@ -33,7 +33,7 @@ HORARIO_INICIO = 8
 HORARIO_FIN = 18
 DIAS_LABORALES = [0, 1, 2, 3, 4, 5]  # Lun–Sáb
 
-mcp = FastMCP("AutomaDent Supabase Server")
+mcp = FastMCP("AutomaDent Supabase Server", host="0.0.0.0", port=8001)
 
 
 # ==============================================================================
@@ -608,5 +608,5 @@ def obtener_mis_citas(telegram_chat_id: str, user_role: str) -> str:
 # ==============================================================================
 
 if __name__ == "__main__":
-    print("🚀 AutomaDent MCP Server iniciando en http://localhost:8001/mcp ...")
-    mcp.run(transport="streamable-http", host="0.0.0.0", port=8001)
+    print("AutomaDent MCP Server iniciando en http://localhost:8001/mcp ...")
+    mcp.run(transport="streamable-http")
