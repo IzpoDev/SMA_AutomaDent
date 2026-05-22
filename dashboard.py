@@ -116,7 +116,7 @@ def get_pagos():
 # ==============================================================================
 
 # Barra lateral - Navegación
-st.sidebar.image("https://cdn-icons-png.flaticon.com/512/3467/3467831.png", width=80)
+st.sidebar.image("https://www.svgrepo.com/show/51998/dentist.svg", width=80)
 st.sidebar.title("AutomaDent Portal")
 st.sidebar.subheader("Clínica Dental Inteligente")
 
