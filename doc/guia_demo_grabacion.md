@@ -69,40 +69,57 @@ Agendar una cita para mañana a las 10:00 AM con el odontólogo [Nombre de tu Co
 
 ---
 
-### 📌 Escena 4 — Odontólogo consulta sus citas (Celular del Compañero)
-**Acción:** Tu compañero escribe al bot:
+### 📌 Escena 4 — Odontólogo consulta recursos: citas y pacientes (Celular del Compañero)
+**Acción 1:** Tu compañero escribe al bot:
 ```
 dame la lista de mis citas
 ```
 **Resultado esperado:** El bot le muestra una lista organizada de **sus** citas asignadas para hoy/mañana. El filtro automático asegura que no vea citas de otros odontólogos.
 
+**Acción 2 (Nueva funcionalidad):** Tu compañero escribe:
+```
+dame la lista de pacientes
+```
+**Resultado esperado:** El bot de Recepción/Asistente Médico le devuelve el listado de pacientes registrados, incluyendo IDs y datos de contacto.
+
+**Acción 3 (Nueva funcionalidad):** Tu compañero consulta el historial clínico del paciente registrado usando su ID:
+```
+dame el historial clinico del paciente con ID 1
+```
+**Resultado esperado:** El bot devuelve el historial médico y de atenciones del paciente en formato HTML claro.
+
 ---
 
-### 📌 Escena 5 — Odontólogo atiende la cita y registra evolución (Celular del Compañero)
-**Acción:** Al finalizar la consulta médica simulada, tu compañero escribe:
+### 📌 Escena 5 — Odontólogo atiende la cita (cambio de estado y evolución) (Celular del Compañero)
+**Acción 1:** Tu compañero marca la cita como atendida:
 ```
-Registrar evolución para la cita #X: diagnóstico caries leve, tratamiento profilaxis, observaciones paciente con buena higiene
+marcar la cita #X como atendida
+```
+*(Reemplaza X con el ID de la cita agendada en la Escena 3)*
+**Resultado esperado:**
+*   **En la pantalla de tu compañero (Odontólogo)**:
+    > ✅ Cita #X: 'programada' -> 'asistida'.
+*   **En tu pantalla (Paciente)**: Recibes una notificación automática al instante:
+    > ✅ <b>Tu cita #X fue completada.</b>
+    > ¡Gracias por visitarnos!
+
+**Acción 2:** Tu compañero registra la evolución médica de la cita (ya en estado asistida):
+```
+registrar evolucion para la cita #X: diagnostico caries leve, tratamiento profilaxis, observaciones paciente con buena higiene
 ```
 **Resultado esperado:**
 *   **En la pantalla de tu compañero (Odontólogo)**:
-    > ✅ Evolución médica guardada correctamente para la cita #X. El estado de la cita se cambió a asistida.
-*   **En tu pantalla (Paciente)**: Recibes una notificación automática de que tu consulta terminó:
-    > 🦷 **Tu Consulta ha Finalizado**
-    > El Dr. [Nombre de tu Compañero] ha registrado tu evolución. 
-    > 💰 Costo total: S/ [Monto]. Para realizar tu pago por transferencia, envía el comprobante a esta cuenta: [Datos de Cuenta].
+    > ✅ Evolución médica registrada para la cita #X.
 
 ---
 
-### 📌 Escena 6 — Flujo de Pago y Cierre de la Cita (Ambos Celulares)
-**Acción:** Tú (Paciente) escribes en tu chat:
+### 📌 Escena 6 — Flujo de Pago y Cierre administrativo (Ambos Celulares)
+**Acción 1:** Como el Odontólogo ahora tiene plenas capacidades de administración para facilitar tu demo con un solo compañero, él mismo puede registrar el pago de la cita finalizada:
 ```
-Ya realicé el pago por transferencia de la cita #X, aquí está el comprobante
+registrar pago de la cita #X por S/ 50 en efectivo
 ```
-**Acción:** Tu compañero (Odontólogo) valida y registra el pago en su chat administrativo escribiendo:
-```
-Registrar pago de la cita #X por S/ [Monto] en transferencia
-```
-**Resultado esperado:** El bot de Facturación responde a tu compañero confirmando el registro de la transacción y se actualiza el estado de pago en la base de datos.
+**Resultado esperado:** El bot de Facturación responde a tu compañero confirmando el registro de la transacción y se actualiza el estado de pago en la base de datos:
+    > ✅ Pago de S/ 50.00 con 'efectivo' registrado para la cita #X.
 
 ---
 

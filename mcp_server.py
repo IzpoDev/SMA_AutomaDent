@@ -537,12 +537,21 @@ def registrar_pago(
 # ==============================================================================
 
 @mcp.tool()
-def listar_pacientes(limite: int = 50) -> str:
-    """Lista los pacientes registrados en la clínica.
+def listar_pacientes(
+    telegram_chat_id: str,
+    user_role: str,
+    limite: int = 50,
+) -> str:
+    """Lista los pacientes registrados en la clínica. Solo para personal clínico o administrativo.
 
     Args:
+        telegram_chat_id: ID de Telegram del usuario que consulta.
+        user_role: Rol del usuario.
         limite: Número máximo de registros a devolver (default: 50).
     """
+    if user_role not in ["odontologo", "recepcionista", "administrador"]:
+        return "❌ Acceso denegado. Esta función es exclusiva para el personal de la clínica."
+
     pacientes = (
         supabase.table("pacientes")
         .select("id, nombre, apellido, telefono, email")
@@ -556,7 +565,7 @@ def listar_pacientes(limite: int = 50) -> str:
     lineas = [f"👥 Pacientes registrados ({len(pacientes.data)}):"]
     for p in pacientes.data:
         lineas.append(
-            f"  #{p['id']} — {p['nombre']} {p['apellido']} | Tel: {p['telefono']} | Email: {p.get('email') or '—'}"
+            f"  #{p['id']} — {p['nombre']} {p['apellido']} | Tel/ChatID: {p['telefono']} | Email: {p.get('email') or '—'}"
         )
     return "\n".join(lineas)
 
