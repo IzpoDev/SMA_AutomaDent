@@ -87,20 +87,20 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if rol in ["odontologo", "recepcionista", "administrador"]:
         rol_txt = rol.upper()
         await update.message.reply_text(
-            f"🔑 *Sesión Administrativa Iniciada*\n\n"
+            f"🔑 <b>Sesión Administrativa Iniciada</b>\n\n"
             f"Bienvenido(a) al bot interno de AutomaDent.\n"
-            f"👤 Rol detectado: *{rol_txt}*\n\n"
+            f"👤 Rol detectado: <b>{rol_txt}</b>\n\n"
             f"Puedes usar tus comandos y herramientas autorizadas directamente.",
-            parse_mode="Markdown"
+            parse_mode="HTML"
         )
     else:
         await update.message.reply_text(
-            "🦷 *¡Bienvenido a la Clínica Dental AutomaDent!*\n\n"
+            "🦷 <b>¡Bienvenido a la Clínica Dental AutomaDent!</b>\n\n"
             "Soy tu asistente virtual. ¿En qué puedo ayudarte hoy?\n\n"
-            "📋 *Registro* — Si eres un nuevo paciente\n"
-            "📅 *Citas* — Consultar disponibilidad y agendar citas\n"
-            "📂 *Historial* — Consultar tu evolución clínica",
-            parse_mode="Markdown"
+            "📋 <b>Registro</b> — Si eres un nuevo paciente\n"
+            "📅 <b>Citas</b> — Consultar disponibilidad y agendar citas\n"
+            "📂 <b>Historial</b> — Consultar tu evolución clínica",
+            parse_mode="HTML"
         )
 
 
@@ -124,7 +124,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             mensaje=texto
         )
 
-        await update.message.reply_text(respuesta)
+        await update.message.reply_text(respuesta, parse_mode="HTML")
         logger.info(f"✅ Respuesta enviada a {chat_id}")
 
     except Exception as e:
@@ -141,32 +141,32 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     rol = await obtener_rol_usuario(chat_id)
 
     ayuda_texto = (
-        "🆘 *Ayuda — Clínica Dental AutomaDent*\n\n"
+        "🆘 <b>Ayuda — Clínica Dental AutomaDent</b>\n\n"
         "Puedes escribirme en lenguaje natural. Ejemplos de uso:\n\n"
     )
 
     if rol == "odontologo":
         ayuda_texto += (
-            "• _\"Finalizar cita 15 y registrar evolución\"_\n"
-            "• _\"Actualizar estado de cita 10 a asistida\"_\n"
-            "• _\"Ver historial clínico de paciente 3\"_"
+            "• <i>\"Finalizar cita 15 y registrar evolución\"</i>\n"
+            "• <i>\"Actualizar estado de cita 10 a asistida\"</i>\n"
+            "• <i>\"Ver historial clínico de paciente 3\"</i>"
         )
     elif rol in ["recepcionista", "administrador"]:
         ayuda_texto += (
-            "• _\"Registrar pago de la cita 5\"_\n"
-            "• _\"Ver disponibilidad de horarios para el viernes\"_\n"
-            "• _\"Agendar cita para odontólogo 1\"_\n"
-            "• _\"Exportar citas de hoy a Excel\"_"
+            "• <i>\"Registrar pago de la cita 5\"</i>\n"
+            "• <i>\"Ver disponibilidad de horarios para el viernes\"</i>\n"
+            "• <i>\"Agendar cita para odontólogo 1\"</i>\n"
+            "• <i>\"Exportar citas de hoy a Excel\"</i>"
         )
     else:
         ayuda_texto += (
-            "• _\"Quiero registrarme\"_\n"
-            "• _\"¿Qué horarios hay disponibles para el viernes?\"_\n"
-            "• _\"Agendar una cita\"_\n"
-            "• _\"Quiero consultar mi historial\"_"
+            "• <i>\"Quiero registrarme\"</i>\n"
+            "• <i>\"¿Qué horarios hay disponibles para el viernes?\"</i>\n"
+            "• <i>\"Agendar una cita\"</i>\n"
+            "• <i>\"Quiero consultar mi historial\"</i>"
         )
 
-    await update.message.reply_text(ayuda_texto, parse_mode="Markdown")
+    await update.message.reply_text(ayuda_texto, parse_mode="HTML")
 
 
 # ==============================================================================
@@ -183,8 +183,23 @@ def main() -> None:
         MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)
     )
 
-    logger.info("🤖 Bot AutomaDent iniciado y escuchando (Polling)...")
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+    webhook_url = os.environ.get("WEBHOOK_URL")
+    port_str = os.environ.get("PORT")
+    port = int(port_str) if port_str and port_str.isdigit() else 8000
+
+    if webhook_url:
+        logger.info(f"🤖 Bot AutomaDent iniciado en modo WEBHOOK en el puerto {port}...")
+        logger.info(f"🔗 URL del Webhook: {webhook_url}/{TELEGRAM_TOKEN}")
+        application.run_webhook(
+            listen="0.0.0.0",
+            port=port,
+            url_path=TELEGRAM_TOKEN,
+            webhook_url=f"{webhook_url}/{TELEGRAM_TOKEN}",
+            allowed_updates=Update.ALL_TYPES
+        )
+    else:
+        logger.info("🤖 Bot AutomaDent iniciado y escuchando en modo POLLING...")
+        application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
 if __name__ == "__main__":

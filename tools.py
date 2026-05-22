@@ -5,6 +5,7 @@
 # ==============================================================================
 
 import os
+import requests
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from typing import Optional, List, Dict, Any
@@ -22,6 +23,29 @@ DIAS_LABORALES = [0, 1, 2, 3, 4, 5]  # Lunes(0) a Sábado(5)
 
 CREDENTIALS_FILE = "credentials.json"
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+
+
+# ==============================================================================
+#  NOTIFICACIONES AL PACIENTE VÍA TELEGRAM
+# ==============================================================================
+
+def _notificar_paciente(paciente_id: int, mensaje: str) -> None:
+    """Envía un mensaje directo al paciente en Telegram cuando cambia el estado de su cita."""
+    bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    if not bot_token:
+        return
+    pac = supabase.table("pacientes").select("telefono").eq("id", paciente_id).limit(1).execute()
+    if not pac.data:
+        return
+    chat_id = pac.data[0]["telefono"]
+    try:
+        requests.post(
+            f"https://api.telegram.org/bot{bot_token}/sendMessage",
+            json={"chat_id": chat_id, "text": mensaje, "parse_mode": "HTML"},
+            timeout=5
+        )
+    except Exception:
+        pass
 
 
 # ==============================================================================
@@ -71,11 +95,11 @@ def crear_paciente_y_historia(
         supabase.table("pacientes")
         .select("id, nombre, apellido")
         .eq("telefono", telegram_chat_id)
-        .maybe_single()
+        .limit(1)
         .execute()
     )
     if existente.data:
-        nombre_completo = f"{existente.data['nombre']} {existente.data['apellido']}"
+        nombre_completo = f"{existente.data[0]['nombre']} {existente.data[0]['apellido']}"
         return f"⚠️ Ya estás registrado como {nombre_completo}. No es necesario registrarte de nuevo."
 
     # 2. Insertar paciente
@@ -218,7 +242,7 @@ def agendar_cita(
         supabase.table("pacientes")
         .select("id, nombre, apellido")
         .eq("telefono", telegram_chat_id)
-        .maybe_single()
+        .limit(1)
         .execute()
     )
     if not paciente.data:
@@ -230,7 +254,7 @@ def agendar_cita(
         .select("id, nombre, apellido")
         .eq("id", odontologo_id)
         .eq("rol", "odontologo")
-        .maybe_single()
+        .limit(1)
         .execute()
     )
     if not doctor.data:
@@ -249,7 +273,7 @@ def agendar_cita(
     nueva_cita = (
         supabase.table("citas")
         .insert({
-            "paciente_id": paciente.data["id"],
+            "paciente_id": paciente.data[0]["id"],
             "odontologo_id": odontologo_id,
             "fecha_hora": dt.isoformat(),
             "estado": "programada",
@@ -259,12 +283,12 @@ def agendar_cita(
     )
     
     cita_id = nueva_cita.data[0]["id"]
-    doc_nombre = f"Dr(a). {doctor.data['nombre']} {doctor.data['apellido']}"
+    doc_nombre = f"Dr(a). {doctor.data[0]['nombre']} {doctor.data[0]['apellido']}"
     
     return (
         f"✅ ¡Cita agendada exitosamente!\n\n"
         f"🆔 Cita #{cita_id}\n"
-        f"👤 Paciente: {paciente.data['nombre']} {paciente.data['apellido']}\n"
+        f"👤 Paciente: {paciente.data[0]['nombre']} {paciente.data[0]['apellido']}\n"
         f"🦷 Odontólogo: {doc_nombre}\n"
         f"📅 Fecha: {dt.strftime('%d/%m/%Y')}\n"
         f"🕐 Hora: {dt.strftime('%H:%M')}"
@@ -292,12 +316,12 @@ def consultar_historial_paciente(
             supabase.table("pacientes")
             .select("id, nombre, apellido")
             .eq("telefono", telegram_chat_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
         if not paciente.data:
             return "❌ No estás registrado en la clínica."
-        target_paciente_id = paciente.data["id"]
+        target_paciente_id = paciente.data[0]["id"]
     else:
         # Personal clínico (odontólogos, recepcionistas, admin)
         if not paciente_id:
@@ -309,29 +333,29 @@ def consultar_historial_paciente(
         supabase.table("historias_clinicas")
         .select("id, antecedentes_medicos, fecha_creacion")
         .eq("paciente_id", target_paciente_id)
-        .maybe_single()
+        .limit(1)
         .execute()
     )
     if not historia.data:
         return "❌ No se encontró historia clínica para el paciente."
 
     # Obtener el nombre del paciente
-    pac_info = supabase.table("pacientes").select("nombre, apellido").eq("id", target_paciente_id).maybe_single().execute()
-    nombre_paciente = f"{pac_info.data['nombre']} {pac_info.data['apellido']}" if pac_info.data else "Desconocido"
+    pac_info = supabase.table("pacientes").select("nombre, apellido").eq("id", target_paciente_id).limit(1).execute()
+    nombre_paciente = f"{pac_info.data[0]['nombre']} {pac_info.data[0]['apellido']}" if pac_info.data else "Desconocido"
 
     # Consultar evoluciones
     evoluciones = (
         supabase.table("atenciones_medicas")
         .select("diagnostico, tratamiento_realizado, observaciones, fecha_atencion")
-        .eq("historia_id", historia.data["id"])
+        .eq("historia_id", historia.data[0]["id"])
         .order("fecha_atencion", desc=True)
         .execute()
     )
 
     texto = (
         f"📂 *Historia Clínica de {nombre_paciente}*\n"
-        f"📅 Fecha Creación: {historia.data['fecha_creacion'][:10]}\n"
-        f"🏥 Antecedentes: {historia.data.get('antecedentes_medicos') or 'Ninguno registrado.'}\n\n"
+        f"📅 Fecha Creación: {historia.data[0]['fecha_creacion'][:10]}\n"
+        f"🏥 Antecedentes: {historia.data[0].get('antecedentes_medicos') or 'Ninguno registrado.'}\n\n"
     )
 
     if not evoluciones.data:
@@ -339,7 +363,7 @@ def consultar_historial_paciente(
     else:
         texto += f"📝 Evolución clínica ({len(evoluciones.data)} atenciones):\n"
         for i, evo in enumerate(evoluciones.data, 1):
-            fecha = pd.to_datetime(evo["fecha_atencion"]).strftime("%d/%m/%Y")
+            fecha = datetime.fromisoformat(str(evo["fecha_atencion"])).strftime("%d/%m/%Y")
             texto += (
                 f"\n*Atención #{i} ({fecha})*\n"
                 f"  🔍 Diagnóstico: {evo['diagnostico']}\n"
@@ -376,7 +400,7 @@ def actualizar_estado_cita(
         supabase.table("citas")
         .select("id, estado")
         .eq("id", cita_id)
-        .maybe_single()
+        .limit(1)
         .execute()
     )
     if not cita.data:
@@ -384,7 +408,18 @@ def actualizar_estado_cita(
 
     supabase.table("citas").update({"estado": nuevo_estado}).eq("id", cita_id).execute()
 
-    return f"✅ Estado de cita #{cita_id} cambiado de '{cita.data['estado']}' a '{nuevo_estado}'."
+    # Notificar al paciente sobre el cambio de estado
+    paciente_id = cita.data[0].get("paciente_id")
+    mensajes_notificacion = {
+        "confirmada": f"✅ <b>Tu cita #{cita_id} ha sido confirmada.</b>\n¡Te esperamos en AutomaDent!",
+        "cancelada": f"❌ <b>Tu cita #{cita_id} ha sido cancelada.</b>\nPor favor contáctanos para reagendar.",
+        "no_show": f"⚠️ <b>Tu cita #{cita_id} fue registrada como no asistida.</b>\nSi hubo un error, comunícate con nosotros.",
+        "asistida": f"✅ <b>Gracias por tu visita.</b>\nTu cita #{cita_id} quedó registrada como completada.",
+    }
+    if paciente_id and nuevo_estado in mensajes_notificacion:
+        _notificar_paciente(paciente_id, mensajes_notificacion[nuevo_estado])
+
+    return f"✅ Estado de cita #{cita_id} cambiado de '{cita.data[0]['estado']}' a '{nuevo_estado}'."
 
 
 @tool
@@ -414,21 +449,21 @@ def registrar_evolucion_medica(
         supabase.table("citas")
         .select("id, estado, paciente_id")
         .eq("id", cita_id)
-        .maybe_single()
+        .limit(1)
         .execute()
     )
     if not cita.data:
         return f"❌ No se encontró la cita #{cita_id}."
 
-    if cita.data["estado"] != "asistida":
+    if cita.data[0]["estado"] != "asistida":
         return f"❌ La cita #{cita_id} debe marcarse primero como 'asistida' para registrar la evolución."
 
     # Obtener historia clínica
     historia = (
         supabase.table("historias_clinicas")
         .select("id")
-        .eq("paciente_id", cita.data["paciente_id"])
-        .maybe_single()
+        .eq("paciente_id", cita.data[0]["paciente_id"])
+        .limit(1)
         .execute()
     )
     if not historia.data:
@@ -436,7 +471,7 @@ def registrar_evolucion_medica(
 
     # Insertar evolución
     supabase.table("atenciones_medicas").insert({
-        "historia_id": historia.data["id"],
+        "historia_id": historia.data[0]["id"],
         "cita_id": cita_id,
         "diagnostico": diagnostico.strip(),
         "tratamiento_realizado": tratamiento_realizado.strip(),
@@ -474,13 +509,13 @@ def registrar_pago(
         supabase.table("citas")
         .select("id, estado")
         .eq("id", cita_id)
-        .maybe_single()
+        .limit(1)
         .execute()
     )
     if not cita.data:
         return f"❌ Cita #{cita_id} no encontrada."
 
-    if cita.data["estado"] != "asistida":
+    if cita.data[0]["estado"] != "asistida":
         return f"❌ No se puede cobrar una cita que no está en estado 'asistida'."
 
     # Registrar el pago
