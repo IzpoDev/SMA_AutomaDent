@@ -58,6 +58,25 @@ def _notificar_paciente(paciente_id: int, mensaje: str) -> None:
         pass
 
 
+def _notificar_odontologo(odontologo_id: int, mensaje: str) -> None:
+    """Envía un mensaje directo al odontólogo en Telegram cuando se le asigna una nueva cita."""
+    bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    if not bot_token:
+        return
+    doc = supabase.table("personal").select("telefono").eq("id", odontologo_id).limit(1).execute()
+    if not doc.data or not doc.data[0].get("telefono"):
+        return
+    chat_id = doc.data[0]["telefono"]
+    try:
+        requests.post(
+            f"https://api.telegram.org/bot{bot_token}/sendMessage",
+            json={"chat_id": chat_id, "text": mensaje, "parse_mode": "HTML"},
+            timeout=5,
+        )
+    except Exception:
+        pass
+
+
 # ==============================================================================
 #  HERRAMIENTAS DE RECEPCIÓN
 # ==============================================================================
@@ -248,12 +267,26 @@ def agendar_cita(
         .execute()
     )
     cita_id = nueva_cita.data[0]["id"]
+    pac_nombre = f"{paciente.data[0]['nombre']} {paciente.data[0]['apellido']}"
+    doc_nombre = f"Dr(a). {doctor.data[0]['nombre']} {doctor.data[0]['apellido']}"
+
+    # Notificar al odontólogo sobre la nueva cita asignada
+    mensaje_odontologo = (
+        f"🔔 <b>Nueva Cita Asignada</b>\n\n"
+        f"📅 Fecha: <b>{dt.strftime('%d/%m/%Y')}</b>\n"
+        f"🕐 Hora: <b>{dt.strftime('%H:%M')}</b>\n"
+        f"👤 Paciente: <b>{pac_nombre}</b>\n"
+        f"📝 Motivo: {motivo_consulta.strip()}\n"
+        f"🆔 Cita #{cita_id}\n\n"
+        f"¡Revisa tu agenda actualizada!"
+    )
+    _notificar_odontologo(odontologo_id, mensaje_odontologo)
 
     return (
         f"✅ ¡Cita agendada!\n"
         f"🆔 Cita #{cita_id}\n"
-        f"👤 Paciente: {paciente.data[0]['nombre']} {paciente.data[0]['apellido']}\n"
-        f"🦷 Dr(a). {doctor.data[0]['nombre']} {doctor.data[0]['apellido']}\n"
+        f"👤 Paciente: {pac_nombre}\n"
+        f"🦷 {doc_nombre}\n"
         f"📅 {dt.strftime('%d/%m/%Y')} a las {dt.strftime('%H:%M')}"
     )
 
