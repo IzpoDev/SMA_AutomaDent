@@ -19,7 +19,7 @@ services:
     env_file:
       - .env
     environment:
-      - MCP_SERVER_URL=http://mcp-server:8001/sse
+      - MCP_SERVER_URL=http://mcp-server:8001/mcp
     depends_on:
       - mcp-server
     networks:
