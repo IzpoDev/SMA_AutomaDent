@@ -19,8 +19,37 @@ from langgraph.graph.message import add_messages
 
 TIMEZONE = ZoneInfo("America/Lima")
 
-from tools import tools_recepcion, tools_medico, tools_facturacion
 from database import guardar_mensaje, obtener_historial_mensajes
+
+# ─── Herramientas MCP (pobladas por main.py al iniciar) ──────────────────────
+# Nombres de las tools según están definidas en mcp_server.py
+_TOOLS_RECEPCION_NAMES = {
+    "crear_paciente_y_historia",
+    "consultar_disponibilidad_agenda",
+    "agendar_cita",
+    "consultar_historial_paciente",
+    "obtener_mis_citas",
+}
+_TOOLS_MEDICO_NAMES = {
+    "actualizar_estado_cita",
+    "registrar_evolucion_medica",
+}
+_TOOLS_FACTURACION_NAMES = {
+    "registrar_pago",
+}
+
+_tools_recepcion: list = []
+_tools_medico: list = []
+_tools_facturacion: list = []
+
+
+def set_mcp_tools(all_tools: list) -> None:
+    """Llamado por main.py después de conectar al servidor MCP.
+    Distribuye las herramientas MCP a cada agente según su nombre."""
+    global _tools_recepcion, _tools_medico, _tools_facturacion
+    _tools_recepcion = [t for t in all_tools if t.name in _TOOLS_RECEPCION_NAMES]
+    _tools_medico = [t for t in all_tools if t.name in _TOOLS_MEDICO_NAMES]
+    _tools_facturacion = [t for t in all_tools if t.name in _TOOLS_FACTURACION_NAMES]
 
 load_dotenv()
 
@@ -171,16 +200,16 @@ def supervisor_node(state: AgentState) -> dict:
         }
 
 
-def recepcion_node(state: AgentState) -> dict:
+async def recepcion_node(state: AgentState) -> dict:
     messages = state["messages"]
     chat_id = state["telegram_chat_id"]
     role = state["user_role"]
 
     fecha_hoy = datetime.now(TIMEZONE).strftime("%Y-%m-%d")
     prompt = PROMPT_RECEPCION.format(user_role=role, telegram_chat_id=chat_id, fecha_hoy=fecha_hoy)
-    llm_with_tools = llm.bind_tools(tools_recepcion)
+    llm_with_tools = llm.bind_tools(_tools_recepcion)
 
-    response = llm_with_tools.invoke([
+    response = await llm_with_tools.ainvoke([
         SystemMessage(content=prompt),
         *messages,
     ])
@@ -188,17 +217,16 @@ def recepcion_node(state: AgentState) -> dict:
     if response.tool_calls:
         tool_results = []
         for tool_call in response.tool_calls:
-            # Inyectar argumentos de seguridad
             tool_call["args"]["telegram_chat_id"] = chat_id
             tool_call["args"]["user_role"] = role
 
-            tool_fn = _get_tool_by_name(tool_call["name"], tools_recepcion)
+            tool_fn = _get_tool_by_name(tool_call["name"], _tools_recepcion)
             if tool_fn:
-                result = tool_fn.invoke(tool_call["args"])
-                tool_results.append(result)
+                result = await tool_fn.ainvoke(tool_call["args"])
+                tool_results.append(str(result))
 
         context_msg = "\n\n".join(tool_results)
-        final_response = llm.invoke([
+        final_response = await llm.ainvoke([
             SystemMessage(content=prompt),
             *messages,
             AIMessage(content=f"[Resultado de herramientas]:\n{context_msg}"),
@@ -213,15 +241,15 @@ def recepcion_node(state: AgentState) -> dict:
     return {"messages": [response], "next_agent": "FINISH"}
 
 
-def medico_node(state: AgentState) -> dict:
+async def medico_node(state: AgentState) -> dict:
     messages = state["messages"]
     chat_id = state["telegram_chat_id"]
     role = state["user_role"]
 
     prompt = PROMPT_ASISTENTE_MEDICO.format(user_role=role)
-    llm_with_tools = llm.bind_tools(tools_medico)
+    llm_with_tools = llm.bind_tools(_tools_medico)
 
-    response = llm_with_tools.invoke([
+    response = await llm_with_tools.ainvoke([
         SystemMessage(content=prompt),
         *messages,
     ])
@@ -232,13 +260,13 @@ def medico_node(state: AgentState) -> dict:
             tool_call["args"]["telegram_chat_id"] = chat_id
             tool_call["args"]["user_role"] = role
 
-            tool_fn = _get_tool_by_name(tool_call["name"], tools_medico)
+            tool_fn = _get_tool_by_name(tool_call["name"], _tools_medico)
             if tool_fn:
-                result = tool_fn.invoke(tool_call["args"])
-                tool_results.append(result)
+                result = await tool_fn.ainvoke(tool_call["args"])
+                tool_results.append(str(result))
 
         context_msg = "\n\n".join(tool_results)
-        final_response = llm.invoke([
+        final_response = await llm.ainvoke([
             SystemMessage(content=prompt),
             *messages,
             AIMessage(content=f"[Resultado de herramientas]:\n{context_msg}"),
@@ -253,15 +281,15 @@ def medico_node(state: AgentState) -> dict:
     return {"messages": [response], "next_agent": "FINISH"}
 
 
-def facturacion_node(state: AgentState) -> dict:
+async def facturacion_node(state: AgentState) -> dict:
     messages = state["messages"]
     chat_id = state["telegram_chat_id"]
     role = state["user_role"]
 
     prompt = PROMPT_FACTURACION.format(user_role=role)
-    llm_with_tools = llm.bind_tools(tools_facturacion)
+    llm_with_tools = llm.bind_tools(_tools_facturacion)
 
-    response = llm_with_tools.invoke([
+    response = await llm_with_tools.ainvoke([
         SystemMessage(content=prompt),
         *messages,
     ])
@@ -272,13 +300,13 @@ def facturacion_node(state: AgentState) -> dict:
             tool_call["args"]["telegram_chat_id"] = chat_id
             tool_call["args"]["user_role"] = role
 
-            tool_fn = _get_tool_by_name(tool_call["name"], tools_facturacion)
+            tool_fn = _get_tool_by_name(tool_call["name"], _tools_facturacion)
             if tool_fn:
-                result = tool_fn.invoke(tool_call["args"])
-                tool_results.append(result)
+                result = await tool_fn.ainvoke(tool_call["args"])
+                tool_results.append(str(result))
 
         context_msg = "\n\n".join(tool_results)
-        final_response = llm.invoke([
+        final_response = await llm.ainvoke([
             SystemMessage(content=prompt),
             *messages,
             AIMessage(content=f"[Resultado de herramientas]:\n{context_msg}"),
