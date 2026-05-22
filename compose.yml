@@ -1,0 +1,42 @@
+services:
+  mcp-server:
+    build: .
+    container_name: mcp-server
+    command: python mcp_server.py
+    restart: always
+    env_file:
+      - .env
+    ports:
+      - "8001:8001"
+    networks:
+      - general-network
+
+  bot:
+    build: .
+    container_name: automadent-bot
+    command: python main.py
+    restart: always
+    env_file:
+      - .env
+    environment:
+      - MCP_SERVER_URL=http://mcp-server:8001/sse
+    depends_on:
+      - mcp-server
+    networks:
+      - general-network
+
+  dashboard-agentdent:
+    build: .
+    container_name: dashboard-agentdent
+    command: streamlit run dashboard.py --server.port=8502 --server.address=0.0.0.0
+    restart: always
+    env_file:
+      - .env
+    ports:
+      - "8502:8502"
+    networks:
+      - general-network
+
+networks:
+  general-network:
+    external: true
