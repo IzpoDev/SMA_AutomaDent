@@ -1,0 +1,20 @@
+<component name="InspectionProjectProfileManager">
+  <profile version="1.0">
+    <option name="myName" value="Project Default" />
+    <inspection_tool class="PyPackageRequirementsInspection" enabled="false" level="WARNING" enabled_by_default="false">
+      <option name="ignoredPackages">
+        <list>
+          <option value="tensorflow" />
+          <option value="keras" />
+          <option value="numpy" />
+          <option value="matplotlib" />
+          <option value="tqdm" />
+          <option value="pandas" />
+          <option value="gdown" />
+          <option value="Pillow" />
+          <option value="glob2" />
+        </list>
+      </option>
+    </inspection_tool>
+  </profile>
+</component>
