@@ -22,28 +22,28 @@ Write-Host ""
 # 1. MCP Server (puerto 8001)
 Write-Host "[1/4] Iniciando MCP Server en puerto 8001..." -ForegroundColor Yellow
 Start-Process powershell -ArgumentList "-NoExit", "-Command",
-    "cd '$project'; Write-Host 'MCP SERVER — puerto 8001' -ForegroundColor Green; .\venv\Scripts\python.exe mcp_server.py"
+    "cd '$project\bot'; Write-Host 'MCP SERVER — puerto 8001' -ForegroundColor Green; `$env:PYTHONPATH = '$project\shared'; & '$project\venv\Scripts\python.exe' mcp_server.py"
 
 Start-Sleep -Seconds 3
 
 # 2. API REST FastAPI (puerto 8000)
 Write-Host "[2/4] Iniciando API REST en puerto 8000..." -ForegroundColor Yellow
 Start-Process powershell -ArgumentList "-NoExit", "-Command",
-    "cd '$project'; Write-Host 'API REST — puerto 8000 | Swagger: http://localhost:8000/docs' -ForegroundColor Green; .\venv\Scripts\python.exe -m uvicorn api:app --reload --port 8000"
+    "cd '$project\api'; Write-Host 'API REST — puerto 8000 | Swagger: http://localhost:8000/docs' -ForegroundColor Green; `$env:PYTHONPATH = '$project\shared'; & '$project\venv\Scripts\python.exe' -m uvicorn main:app --reload --port 8000"
 
 Start-Sleep -Seconds 2
 
 # 3. Dashboard Streamlit (puerto 8502)
 Write-Host "[3/4] Iniciando Dashboard Streamlit en puerto 8502..." -ForegroundColor Yellow
 Start-Process powershell -ArgumentList "-NoExit", "-Command",
-    "cd '$project'; Write-Host 'DASHBOARD — http://localhost:8502' -ForegroundColor Green; .\venv\Scripts\streamlit run dashboard.py --server.port 8502"
+    "cd '$project\dashboard'; Write-Host 'DASHBOARD — http://localhost:8502' -ForegroundColor Green; `$env:PYTHONPATH = '$project\shared'; & '$project\venv\Scripts\streamlit.exe' run app.py --server.port 8502"
 
 Start-Sleep -Seconds 2
 
 # 4. Bot de Telegram
 Write-Host "[4/4] Iniciando Bot de Telegram..." -ForegroundColor Yellow
 Start-Process powershell -ArgumentList "-NoExit", "-Command",
-    "cd '$project'; Write-Host 'BOT TELEGRAM — Polling activo' -ForegroundColor Green; .\venv\Scripts\python.exe main.py"
+    "cd '$project\bot'; Write-Host 'BOT TELEGRAM — Polling activo' -ForegroundColor Green; `$env:PYTHONPATH = '$project\shared'; & '$project\venv\Scripts\python.exe' main.py"
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Green

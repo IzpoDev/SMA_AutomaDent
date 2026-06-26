@@ -1,11 +1,16 @@
 # agents.py — Cerebro del Sistema Multiagente (SMA)
 # ==============================================================================
 # Orquesta el flujo de interacción Hub-and-Spoke.
-# Incorpora el rol del usuario (user_role) en el estado y los prompts
-# para garantizar el control de acceso (RBAC).
+# Incorpora:
+#   - Cascada de fallbacks para manejar límites de cuota (RPM/RPD)
+#   - Inyección RAG vectorial desde Supabase (pgvector)
+#   - Resúmenes automáticos de historial (memoria compacta)
+#   - RBAC por rol de usuario
 # ==============================================================================
 
 import os
+import time
+import asyncio
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from typing import Literal, Annotated
@@ -19,10 +24,15 @@ from langgraph.graph.message import add_messages
 
 TIMEZONE = ZoneInfo("America/Lima")
 
-from database import guardar_mensaje, obtener_historial_mensajes
+from database import (
+    guardar_mensaje,
+    obtener_historial_con_resumen,
+    guardar_resumen,
+    contar_turnos_desde_ultimo_resumen,
+    buscar_soporte_rag,
+)
 
 # ─── Herramientas MCP (pobladas por main.py al iniciar) ──────────────────────
-# Nombres de las tools según están definidas en mcp_server.py
 _TOOLS_RECEPCION_NAMES = {
     "crear_paciente_y_historia",
     "consultar_disponibilidad_agenda",
@@ -58,13 +68,84 @@ def set_mcp_tools(all_tools: list) -> None:
 
 load_dotenv()
 
-# ─── LLM ─────────────────────────────────────────────────────────────────────
-llm = ChatGoogleGenerativeAI(
-    model="gemini-3.1-flash-lite",
-    google_api_key=os.environ["GEMINI_API_KEY"],
-    temperature=0.3,
-    convert_system_message_to_human=False,
-)
+# ─── Cascada de Modelos (Principal → Fallback 1 → Fallback 2) ─────────────────
+_MODEL_CASCADE = [
+    "gemini-2.0-flash-lite",   # Principal — Mayor cuota diaria
+    "gemini-2.5-flash-lite-preview-06-17",   # Fallback 1
+    "gemini-2.5-flash",         # Fallback 2
+]
+
+def _build_llm(model_name: str, temperature: float = 0.3) -> ChatGoogleGenerativeAI:
+    return ChatGoogleGenerativeAI(
+        model=model_name,
+        google_api_key=os.environ["GEMINI_API_KEY"],
+        temperature=temperature,
+        convert_system_message_to_human=False,
+    )
+
+# LLM principal (reutilizado en los nodos para evitar re-instanciar en cada llamada)
+llm = _build_llm(_MODEL_CASCADE[0])
+
+
+def invocar_llm_con_fallback(messages: list, tools: list = None, temperature: float = 0.3):
+    """
+    Intenta invocar el LLM con la cascada de modelos definida en _MODEL_CASCADE.
+    Si recibe un error 429 (cuota), espera brevemente y pasa al siguiente modelo.
+
+    Args:
+        messages: Lista de mensajes LangChain (SystemMessage, HumanMessage, AIMessage).
+        tools: Lista de tools a vincular (opcional).
+        temperature: Temperatura de generación.
+
+    Returns:
+        Respuesta AIMessage del primer modelo que responda exitosamente.
+
+    Raises:
+        Exception: Si todos los modelos del cascade fallan.
+    """
+    last_exc = None
+    for model_name in _MODEL_CASCADE:
+        try:
+            candidate = _build_llm(model_name, temperature)
+            if tools:
+                candidate = candidate.bind_tools(tools)
+            response = candidate.invoke(messages)
+            if model_name != _MODEL_CASCADE[0]:
+                print(f"[FALLBACK] Respondió con modelo: {model_name}")
+            return response
+        except Exception as e:
+            err_str = str(e).lower()
+            if "429" in err_str or "quota" in err_str or "resource_exhausted" in err_str:
+                print(f"[FALLBACK] Cuota agotada en {model_name}, probando siguiente...")
+                time.sleep(1)
+                last_exc = e
+            else:
+                raise  # Error no relacionado a cuota → relanzar
+    raise last_exc or Exception("Todos los modelos del cascade fallaron.")
+
+
+async def invocar_llm_con_fallback_async(messages: list, tools: list = None, temperature: float = 0.3):
+    """Versión asíncrona de invocar_llm_con_fallback."""
+    last_exc = None
+    for model_name in _MODEL_CASCADE:
+        try:
+            candidate = _build_llm(model_name, temperature)
+            if tools:
+                candidate = candidate.bind_tools(tools)
+            response = await candidate.ainvoke(messages)
+            if model_name != _MODEL_CASCADE[0]:
+                print(f"[FALLBACK] Respondió con modelo: {model_name}")
+            return response
+        except Exception as e:
+            err_str = str(e).lower()
+            if "429" in err_str or "quota" in err_str or "resource_exhausted" in err_str:
+                print(f"[FALLBACK] Cuota agotada en {model_name}, probando siguiente...")
+                await asyncio.sleep(1)
+                last_exc = e
+            else:
+                raise
+    raise last_exc or Exception("Todos los modelos del cascade fallaron.")
+
 
 # ─── Estado del grafo ────────────────────────────────────────────────────────
 class AgentState(TypedDict):
@@ -75,7 +156,7 @@ class AgentState(TypedDict):
 
 
 # ==============================================================================
-#  SYSTEM PROMPTS ACTUALIZADOS CON REGLAS DE ROLES (RBAC)
+#  SYSTEM PROMPTS CON REGLAS DE ROLES (RBAC)
 # ==============================================================================
 
 PROMPT_SUPERVISOR = """Eres el Orquestador Central de la Clínica Dental AutomaDent.
@@ -168,6 +249,17 @@ Usa EXCLUSIVAMENTE formato HTML para resaltar texto (ej: <b>negrita</b>, <i>curs
 - Si el usuario es un paciente y quiere pagar, indícale amablemente que debe realizar el pago en caja con la recepcionista para que ella lo registre.
 """
 
+PROMPT_RESUMEN = """Eres un asistente de compresión de contexto. Se te proporcionará un historial de conversación entre un usuario y el bot de AutomaDent (clínica dental).
+
+Tu tarea es generar un resumen compacto y estructurado en español que capture:
+- La identidad del usuario (si se mencionó nombre o rol).
+- Acciones ya realizadas (registros, citas agendadas, consultas, pagos).
+- Preferencias o solicitudes pendientes.
+- Información importante para el contexto futuro.
+
+Responde SOLO con el resumen, sin explicaciones adicionales. Máximo 200 palabras. Usa formato de lista si hay múltiples puntos.
+"""
+
 
 # ==============================================================================
 #  NODOS DEL GRAFO
@@ -193,7 +285,7 @@ def supervisor_node(state: AgentState) -> dict:
 
     prompt = PROMPT_SUPERVISOR.format(telegram_chat_id=chat_id, user_role=role)
 
-    response = llm.invoke([
+    response = invocar_llm_con_fallback([
         SystemMessage(content=prompt),
         *messages,
     ])
@@ -220,12 +312,11 @@ async def recepcion_node(state: AgentState) -> dict:
 
     fecha_hoy = datetime.now(TIMEZONE).strftime("%Y-%m-%d")
     prompt = PROMPT_RECEPCION.format(user_role=role, telegram_chat_id=chat_id, fecha_hoy=fecha_hoy)
-    llm_with_tools = llm.bind_tools(_tools_recepcion)
 
-    response = await llm_with_tools.ainvoke([
-        SystemMessage(content=prompt),
-        *messages,
-    ])
+    response = await invocar_llm_con_fallback_async(
+        [SystemMessage(content=prompt), *messages],
+        tools=_tools_recepcion,
+    )
 
     if response.tool_calls:
         tool_results = []
@@ -239,7 +330,7 @@ async def recepcion_node(state: AgentState) -> dict:
                 tool_results.append(str(result))
 
         context_msg = "\n\n".join(tool_results)
-        final_response = await llm.ainvoke([
+        final_response = await invocar_llm_con_fallback_async([
             SystemMessage(content=prompt),
             *messages,
             AIMessage(content=f"[Resultado de herramientas]:\n{context_msg}"),
@@ -260,12 +351,11 @@ async def medico_node(state: AgentState) -> dict:
     role = state["user_role"]
 
     prompt = PROMPT_ASISTENTE_MEDICO.format(user_role=role)
-    llm_with_tools = llm.bind_tools(_tools_medico)
 
-    response = await llm_with_tools.ainvoke([
-        SystemMessage(content=prompt),
-        *messages,
-    ])
+    response = await invocar_llm_con_fallback_async(
+        [SystemMessage(content=prompt), *messages],
+        tools=_tools_medico,
+    )
 
     if response.tool_calls:
         tool_results = []
@@ -279,7 +369,7 @@ async def medico_node(state: AgentState) -> dict:
                 tool_results.append(str(result))
 
         context_msg = "\n\n".join(tool_results)
-        final_response = await llm.ainvoke([
+        final_response = await invocar_llm_con_fallback_async([
             SystemMessage(content=prompt),
             *messages,
             AIMessage(content=f"[Resultado de herramientas]:\n{context_msg}"),
@@ -300,12 +390,11 @@ async def facturacion_node(state: AgentState) -> dict:
     role = state["user_role"]
 
     prompt = PROMPT_FACTURACION.format(user_role=role)
-    llm_with_tools = llm.bind_tools(_tools_facturacion)
 
-    response = await llm_with_tools.ainvoke([
-        SystemMessage(content=prompt),
-        *messages,
-    ])
+    response = await invocar_llm_con_fallback_async(
+        [SystemMessage(content=prompt), *messages],
+        tools=_tools_facturacion,
+    )
 
     if response.tool_calls:
         tool_results = []
@@ -319,7 +408,7 @@ async def facturacion_node(state: AgentState) -> dict:
                 tool_results.append(str(result))
 
         context_msg = "\n\n".join(tool_results)
-        final_response = await llm.ainvoke([
+        final_response = await invocar_llm_con_fallback_async([
             SystemMessage(content=prompt),
             *messages,
             AIMessage(content=f"[Resultado de herramientas]:\n{context_msg}"),
@@ -383,32 +472,83 @@ app = graph.compile()
 
 
 # ==============================================================================
+#  RESUMEN AUTOMÁTICO DE HISTORIAL
+# ==============================================================================
+
+_TURNOS_PARA_RESUMIR = 10  # Resumir cada 10 mensajes (5 intercambios)
+
+async def _intentar_resumir_si_es_necesario(chat_id: str, messages_list: list) -> None:
+    """Si el historial supera el umbral, genera y guarda un resumen comprimido."""
+    try:
+        turnos = contar_turnos_desde_ultimo_resumen(chat_id)
+        if turnos < _TURNOS_PARA_RESUMIR:
+            return
+
+        # Tomar los últimos mensajes para resumir
+        bloque = "\n".join(
+            f"{'Usuario' if m['sender'] == 'user' else 'Bot'}: {m['content']}"
+            for m in messages_list
+        )
+        resumen_response = invocar_llm_con_fallback([
+            SystemMessage(content=PROMPT_RESUMEN),
+            HumanMessage(content=bloque),
+        ], temperature=0.1)
+        resumen_texto = _get_text_content(resumen_response.content).strip()
+        if resumen_texto:
+            guardar_resumen(chat_id, resumen_texto)
+            print(f"[RESUMEN] ✅ Resumen generado para chat {chat_id} ({turnos} turnos).")
+    except Exception as e:
+        print(f"[RESUMEN] ❌ Error generando resumen: {e}")
+
+
+# ==============================================================================
 #  FUNCIÓN PÚBLICA DE PROCESAMIENTO
 # ==============================================================================
 
 async def procesar_mensaje(telegram_chat_id: str, user_role: str, mensaje: str) -> str:
     """Punto de entrada al SMA.
-    
+
     Args:
         telegram_chat_id: ID del chat de Telegram.
         user_role: Rol resuelto del usuario en Supabase ('paciente', 'odontologo', etc.).
         mensaje: El mensaje de texto.
     """
-    # 1. Obtener historial desde Supabase
-    historial = obtener_historial_mensajes(telegram_chat_id, limite=20)
-    
-    # 2. Reconstruir lista de mensajes para LangChain
+    # 1. Obtener historial con soporte de resúmenes compactos
+    historial_data = obtener_historial_con_resumen(telegram_chat_id, limite_mensajes=8)
+    resumen = historial_data["resumen"]
+    mensajes_recientes = historial_data["mensajes"]
+
+    # 2. Disparar resumen en background si se supera el umbral (sin bloquear)
+    asyncio.create_task(_intentar_resumir_si_es_necesario(telegram_chat_id, mensajes_recientes))
+
+    # 3. Reconstruir lista de mensajes para LangChain
     messages_list = []
-    for msg in historial:
+
+    # Inyectar resumen como contexto inicial si existe
+    if resumen:
+        messages_list.append(SystemMessage(
+            content=f"[RESUMEN DE CONVERSACIÓN PREVIA]\n{resumen}"
+        ))
+
+    # Agregar mensajes recientes
+    for msg in mensajes_recientes:
         if msg["sender"] == "user":
             messages_list.append(HumanMessage(content=msg["content"]))
         elif msg["sender"] == "bot":
             messages_list.append(AIMessage(content=msg["content"]))
-            
+
+    # 4. Búsqueda RAG vectorial — inyectar contexto de soporte si hay coincidencias
+    contexto_rag = buscar_soporte_rag(mensaje)
+    if contexto_rag:
+        messages_list.append(SystemMessage(
+            content=f"[INFORMACIÓN DE SOPORTE RAG DE LA CLÍNICA]\n{contexto_rag}\n\nUsa esta información para responder con datos precisos sobre la clínica."
+        ))
+        print(f"[RAG] ✅ Contexto inyectado para: '{mensaje[:60]}...'")
+
     # Agregar el mensaje actual del usuario
     messages_list.append(HumanMessage(content=mensaje))
-    
-    # 3. Invocar al agente con todo el contexto
+
+    # 5. Invocar al agente con todo el contexto
     result = await app.ainvoke({
         "messages": messages_list,
         "next_agent": "supervisor",
@@ -416,7 +556,7 @@ async def procesar_mensaje(telegram_chat_id: str, user_role: str, mensaje: str) 
         "user_role": user_role
     })
 
-    # 4. Obtener la respuesta del bot
+    # 6. Obtener la respuesta del bot
     respuesta = "🤖 Lo siento, ocurrió un inconveniente. ¿Podrías indicarme de nuevo tu consulta?"
     for msg in reversed(result["messages"]):
         if isinstance(msg, AIMessage) and msg.content:
@@ -424,7 +564,7 @@ async def procesar_mensaje(telegram_chat_id: str, user_role: str, mensaje: str) 
             if respuesta:
                 break
 
-    # 5. Guardar el nuevo mensaje del usuario y la respuesta del bot en Supabase
+    # 7. Guardar el nuevo mensaje del usuario y la respuesta del bot en Supabase
     guardar_mensaje(telegram_chat_id, "user", mensaje)
     guardar_mensaje(telegram_chat_id, "bot", respuesta)
 
