@@ -6,6 +6,36 @@
 
 ---
 
+## 🌐 Contexto de Consumo Web (Frontend)
+
+Para consumir esta API desde una aplicación web (Angular, React, Vue, etc.), ten en cuenta lo siguiente:
+
+1. **CORS Habilitado:** La API (FastAPI) ya tiene configurado `CORSMiddleware` para permitir peticiones desde cualquier origen (`*`) durante el desarrollo. No deberías tener bloqueos por CORS al probar localmente.
+2. **Flujo de Autenticación:** 
+   - El frontend debe primero hacer un `POST` a `/api/auth/login` con `username` y `password` en formato JSON.
+   - Si las credenciales son correctas, la API devolverá un `access_token` (JWT).
+   - El frontend debe guardar este token (por ejemplo, en `localStorage` o `sessionStorage`).
+3. **Peticiones Protegidas:** Para consumir cualquier otro endpoint, el frontend debe adjuntar el token guardado en las cabeceras HTTP de la petición, específicamente en la cabecera `Authorization` usando el formato `Bearer <token>`.
+4. **Formato de Datos:** Todas las peticiones `POST` y `PUT` esperan recibir y enviar datos en formato `application/json`.
+
+**Ejemplo de Petición con Fetch API (JavaScript):**
+```javascript
+// Ejemplo para obtener la lista de pacientes
+const token = localStorage.getItem('access_token');
+
+fetch('http://localhost:8000/api/pacientes/', {
+  method: 'GET',
+  headers: {
+    'Authorization': `Bearer ${token}`,
+    'Content-Type': 'application/json'
+  }
+})
+.then(response => response.json())
+.then(data => console.log(data));
+```
+
+---
+
 ## 🔐 Autenticación
 
 Todos los endpoints (excepto `/api/auth/login`) requieren el header:
