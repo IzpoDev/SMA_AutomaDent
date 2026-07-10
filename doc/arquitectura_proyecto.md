@@ -1,29 +1,29 @@
 # 🦷 Arquitectura del Proyecto: Sistema Multiagente AutomaDent
 
-Este documento detalla la arquitectura del software, los flujos de comunicación, el modelo de datos y los componentes tecnológicos que integran el **Sistema Multiagente para la Clínica Dental AutomaDent**, con especial énfasis en la reciente integración del protocolo **MCP (Model Context Protocol)**.
+Este documento detalla la arquitectura del software, los flujos de comunicación, el modelo de datos y los componentes tecnológicos que integran el **Sistema Multiagente para la Clínica Dental AutomaDent**, bajo la nueva estructura limpia, modular y centralizada en `src/`.
 
 ---
 
 ## 🗺️ 1. Arquitectura General (Hub-and-Spoke + MCP)
 
-El sistema se basa en un patrón de diseño **Hub-and-Spoke (Orquestador y Especialistas)** implementado mediante **LangGraph** y **LangChain**. Recientemente, la lógica de negocio y las integraciones de base de datos fueron desacopladas del cliente Telegram a un servidor dedicado usando **FastMCP**, permitiendo un ecosistema escalable donde la IA consume las herramientas a través de Server-Sent Events (SSE).
+El sistema se basa en un patrón de diseño **Hub-and-Spoke (Orquestador y Especialistas)** implementado mediante **LangGraph** y **LangChain**. La lógica de negocio y las integraciones de base de datos están desacopladas en herramientas MCP que corre en un servidor interno expuesto vía HTTP y consumido dinámicamente por el agente principal.
 
 ```mermaid
 graph TD
     %% Interfaces
-    Telegram[📱 Bot de Telegram - main.py]
-    Dashboard[💻 Dashboard Web - Streamlit]
-    Cron[⏰ Tareas - notifier.py]
+    Telegram[📱 Bot de Telegram - src.telegram.bot]
+    Dashboard[💻 Dashboard Web - src.dashboard.app]
+    Cron[⏰ Tareas - src.notifier.notifier]
 
     %% Capa de Orquestación e IA
-    SMA[🧠 LangGraph - agents.py]
+    SMA[🧠 LangGraph - src.agent.agente]
     Supervisor[👤 Orquestador Central]
     Recepcion[👩‍💼 Agente Recepción]
     Medico[🩺 Agente Médico]
     Facturacion[💰 Agente Facturación]
 
     %% Capa de Datos (MCP)
-    MCPServer[🔌 Servidor MCP - mcp_server.py]
+    MCPServer[🔌 Servidor MCP - src.tools.servidor_mcp]
     DB[(🗄️ Supabase)]
 
     %% Flujos Principales
@@ -34,9 +34,9 @@ graph TD
     Supervisor -->|Ruta intenciones| Facturacion
 
     %% Conexión de herramientas MCP
-    Recepcion -- "Client SSE" --> MCPServer
-    Medico -- "Client SSE" --> MCPServer
-    Facturacion -- "Client SSE" --> MCPServer
+    Recepcion -- "Client SSE/HTTP" --> MCPServer
+    Medico -- "Client SSE/HTTP" --> MCPServer
+    Facturacion -- "Client SSE/HTTP" --> MCPServer
     
     %% Base de Datos
     MCPServer --> DB
@@ -47,19 +47,48 @@ graph TD
 
 ---
 
-## 📦 2. Componentes del Proyecto
+## 📦 2. Estructura de Componentes en `src/`
 
-| Archivo | Tecnología | Rol / Responsabilidad |
-| :--- | :--- | :--- |
-| **`main.py`** | `python-telegram-bot`, `MultiServerMCPClient` | **Cliente Bot**. Arranca en modo polling, se conecta al servidor MCP mediante SSE y arranca la interfaz en Telegram. |
-| **`mcp_server.py`** | `FastMCP`, `Supabase` | **Backend de Herramientas**. Expone las operaciones a la base de datos como herramientas MCP (`@mcp.tool()`) accesibles por red (puerto 8001). |
-| **`agents.py`** | LangGraph, Gemini | **Cerebro del SMA**. Recibe las herramientas inyectadas desde el servidor MCP (`set_mcp_tools`) y orquesta el flujo multiagente. |
-| **`database.py`** | Supabase SDK | **Cliente de Base de Datos Base**. Mantiene la conexión principal para métodos auxiliares (`guardar_mensaje`, etc.). |
-| **`tools.py`** | Python | Archivo legado, algunas de sus funciones migratorias fueron movidas a MCP pero conserva integraciones legacy (como la exportación a Google Sheets). |
-| **`schema.sql`** | PostgreSQL | Define la estructura de tablas, índices y Foreign Keys desplegadas en Supabase. |
-| **`dashboard.py`** | Streamlit | Panel web visual y de gestión administrativa. |
-| **`notifier.py`** | Python | Tareas programadas diarias. |
-| **`.env`** | Env | Configuración local (Supabase, Telegram, MCP_SERVER_URL). |
+La estructura modular del sistema se distribuye de la siguiente manera:
+
+### `src/utils/`
+- **`config.py`**: Centraliza todas las variables de entorno, constantes clínicas (`TIMEZONE`, `HORARIO_INICIO`, etc.) y configuraciones de modelos.
+- **`database.py`**: Inicialización del cliente Supabase singleton y utilidades de almacenamiento de historial de chat, memorias y resúmenes.
+- **`notificaciones.py`**: Centraliza el envío de notificaciones automáticas y alertas a pacientes u odontólogos vía API de Telegram.
+- **`logger.py`**: Setup global para logs rotativos y de consola.
+- **`helpers.py`**: Funciones utilitarias como sanitización de HTML y extracción de contenidos de mensajes de texto.
+
+### `src/modelos/`
+- **`cliente_llm.py`**: Construye el cliente Gemini y administra la lógica de cascada de fallback ante límites de cuota (429).
+- **`embeddings.py`**: Generación de vectores de embeddings de documentos y queries para RAG.
+
+### `src/prompts/`
+- **`sistema_prompts.py`**: Contiene las plantillas de prompts para el Supervisor central y la compresión del historial.
+- **`agente_prompts.py`**: Definiciones de personalidad y reglas RBAC para los agentes de Recepción, Asistente Médico y Facturación.
+
+### `src/agent/`
+- **`estado.py`**: Estructura `AgentState` de LangGraph y mapeo de herramientas permitidas por rol.
+- **`agente.py`**: Construcción del grafo de LangGraph y definición de nodos.
+- **`ejecutor.py`**: Orquestación del flujo del mensaje: búsqueda RAG, carga de memoria compacta, ejecución del grafo y almacenamiento del historial.
+- **`memoria.py`**: Lógica de generación automática de resúmenes asíncronos en segundo plano.
+
+### `src/tools/`
+Módulos que contienen la lógica de negocio registrada como herramientas MCP (`@mcp.tool()`):
+- **`recepcion.py`**: Registro de pacientes, citas e historial.
+- **`medico.py`**: Evoluciones médicas y estados de citas.
+- **`facturacion.py`**: Registro de pagos.
+- **`administrativas.py`**: Listados de citas y personal.
+- **`exportacion.py`**: Reportes en Google Sheets.
+- **`servidor_mcp.py`**: Servidor FastMCP que inicializa y expone las herramientas.
+
+### `src/telegram/`
+- **`bot.py`**: Lógica principal de ejecución de Telegram, polling, handlers `/start` e inicio del subproceso del servidor MCP.
+- **`rbac.py`**: Resolución de roles basada en el chat ID.
+
+### `src/api/`
+- **`app.py`**: Aplicación FastAPI principal.
+- **`auth.py`**: Gestión de tokens JWT y hashing de contraseñas de personal.
+- **`rutas/`**: Controladores de endpoints REST para la gestión web (`citas.py`, `pacientes.py`, `personal.py`, etc.).
 
 ---
 
@@ -69,19 +98,19 @@ graph TD
 sequenceDiagram
     autonumber
     actor Usuario as 📱 Usuario
-    participant Main as 🔌 main.py (Bot)
-    participant MCP as 🌐 mcp_server.py
+    participant Main as 🔌 src.telegram.bot (CLI)
+    participant MCP as 🌐 src.tools.servidor_mcp
     participant DB as 🗄️ Supabase
-    participant SMA as 🧠 agents.py
+    participant SMA as 🧠 src.agent.ejecutor
     
-    Main->>MCP: Se conecta al arrancar (SSE en 8001)
-    MCP-->>Main: Envía lista de herramientas (@mcp.tool)
+    Main->>MCP: Levanta el servidor MCP (puerto 8001)
+    Main->>MCP: Se conecta y obtiene lista de herramientas
     Main->>SMA: Inyecta herramientas a los agentes
     Usuario->>Main: Envía mensaje (ej: "Agendar cita")
-    Main->>DB: Consulta rol asignado al Chat ID
+    Main->>DB: Consulta rol asignado al Chat ID (rbac.py)
     DB-->>Main: Retorna rol
     Main->>SMA: procesar_mensaje()
-    SMA->>SMA: Supervisor enruta a Recepción
+    SMA->>SMA: Inyecta RAG y Memoria Reciente
     SMA->>MCP: Invoca herramienta MCP (agendar_cita)
     MCP->>DB: Realiza inserción
     DB-->>MCP: Retorna OK
@@ -89,16 +118,3 @@ sequenceDiagram
     SMA-->>Main: Respuesta final en HTML
     Main->>Usuario: "✅ Cita agendada"
 ```
-
----
-
-## 🔒 4. Seguridad (RBAC y MCP)
-
-El sistema de roles ha sido trasladado e integrado firmemente en el Servidor MCP:
-1. Las llamadas desde el bot hacia las herramientas MCP incluyen `telegram_chat_id` y `user_role` de forma transparente.
-2. Cada `@mcp.tool()` en `mcp_server.py` realiza la comprobación interna:
-   ```python
-   if user_role not in ["administrador", "recepcionista"]:
-       return "❌ Acceso Denegado."
-   ```
-3. Esto garantiza que incluso si otro cliente de IA (por ejemplo, Claude Code) se conecta al servidor MCP, se deban inyectar los roles o autenticación apropiados.
