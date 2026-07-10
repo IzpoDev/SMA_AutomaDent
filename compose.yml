@@ -1,77 +1,40 @@
 services:
   mcp-server:
     build:
-      context: ./bot
-      dockerfile: Dockerfile
-    container_name: mcp-server
-    command: python mcp_server.py
-    restart: always
-    env_file:
-      - .env
+      context: .
+      dockerfile: docker/Dockerfile.mcp
     ports:
       - "8001:8001"
-    volumes:
-      - ./shared:/shared:ro
-      - ./bot/credentials.json:/app/credentials.json:ro
-    healthcheck:
-      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8001/mcp', timeout=3)"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 15s
-    networks:
-      - automadent-net
-
-  bot:
-    build:
-      context: ./bot
-      dockerfile: Dockerfile
-    container_name: automadent-bot
-    command: python main.py
-    restart: always
     env_file:
       - .env
-    environment:
-      - MCP_SERVER_URL=http://mcp-server:8001/mcp
-    volumes:
-      - ./shared:/shared:ro
-      - ./bot/credentials.json:/app/credentials.json:ro
-    depends_on:
-      mcp-server:
-        condition: service_healthy
-    networks:
-      - automadent-net
+    restart: unless-stopped
 
   api:
     build:
-      context: ./api
-      dockerfile: Dockerfile
-    container_name: automadent-api
-    restart: always
-    env_file:
-      - .env
+      context: .
+      dockerfile: docker/Dockerfile.api
     ports:
       - "8000:8000"
-    volumes:
-      - ./shared:/shared:ro
-    networks:
-      - automadent-net
+    env_file:
+      - .env
+    restart: unless-stopped
+
+  bot:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.bot
+    env_file:
+      - .env
+    depends_on:
+      - mcp-server
+    restart: unless-stopped
 
   dashboard:
     build:
-      context: ./dashboard
-      dockerfile: Dockerfile
-    container_name: automadent-dashboard
-    restart: always
-    env_file:
-      - .env
+      context: .
+      dockerfile: docker/Dockerfile.dashboard
     ports:
       - "8502:8502"
-    volumes:
-      - ./shared:/shared:ro
-    networks:
-      - automadent-net
-
-networks:
-  automadent-net:
-    driver: bridge
+    env_file:
+      - .env
+    restart: unless-stopped

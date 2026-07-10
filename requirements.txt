@@ -1,0 +1,29 @@
+# Api
+fastapi
+uvicorn
+python-dotenv
+python-jose[cryptography]
+passlib[bcrypt]
+supabase
+# Dashboard
+streamlit
+pandas
+plotly
+# AI Agent
+langchain
+langchain-core
+langchain-google-genai
+langgraph
+langchain-mcp-adapters
+#Telegram
+python-telegram-bot
+#Protocolos
+httpx
+tzdata
+mcp[cli]
+#Google
+google-genai
+google-auth
+google-auth-oauthlib
+google-api-python-client
+gspread

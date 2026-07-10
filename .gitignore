@@ -8,3 +8,6 @@ env/
 *.json
 .claude
 .idea/
+logs/
+datos/credentials.json
+credentials.json
