@@ -39,9 +39,9 @@ Write-Host "[4/4] Iniciando Bot de Telegram..." -ForegroundColor Yellow
 Start-Process powershell -ArgumentList "-NoExit", "-Command",
     "cd '$project'; Write-Host 'BOT TELEGRAM — Polling activo' -ForegroundColor Green; & '$project\venv\Scripts\python.exe' -m src.main bot"
 
-Write-Host ""
 Write-Host "============================================" -ForegroundColor Green
-Write-Host "   Todos los servicios iniciados en la nueva estructura." -ForegroundColor Green
+Write-Host "   Todos los servicios iniciados." -ForegroundColor Green
 Write-Host "============================================" -ForegroundColor Green
 Write-Host ""
+
 
