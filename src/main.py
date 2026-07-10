@@ -39,9 +39,14 @@ def start_dashboard():
     """Arranca el dashboard de Streamlit."""
     logger.info("Arrancando Dashboard Streamlit...")
     try:
-        subprocess.run(["streamlit", "run", "src/dashboard/app.py", "--server.port", "8502"])
+        import os
+        env = os.environ.copy()
+        # Aseguramos que la raíz del proyecto está en el PYTHONPATH
+        env["PYTHONPATH"] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        subprocess.run(["streamlit", "run", "src/dashboard/app.py", "--server.port", "8502"], env=env)
     except KeyboardInterrupt:
         logger.info("Dashboard detenido.")
+
 
 def run_notifier(args):
     """Ejecuta el notifier standalone."""
