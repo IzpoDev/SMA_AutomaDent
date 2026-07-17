@@ -85,16 +85,15 @@ def obtener_historial_mensajes(chat_id: str, limite: int = 20) -> list:
 # ==============================================================================
 
 def guardar_resumen(chat_id: str, summary_content: str) -> None:
-    """Guarda un resumen comprimido del historial con sender='summary'.
+    """Guarda un resumen comprimido del historial en la tabla resumenes_chat.
 
     Args:
         chat_id: ID del chat de Telegram.
         summary_content: Texto del resumen generado por el LLM.
     """
     try:
-        supabase.table("mensajes_chat").insert({
+        supabase.table("resumenes_chat").insert({
             "chat_id": str(chat_id),
-            "sender": "summary",
             "content": summary_content,
         }).execute()
     except Exception as e:
@@ -102,7 +101,8 @@ def guardar_resumen(chat_id: str, summary_content: str) -> None:
 
 
 def obtener_historial_con_resumen(chat_id: str, limite_mensajes: int = 8) -> dict:
-    """Recupera el último resumen disponible y los mensajes más recientes posteriores.
+    """Recupera el último resumen disponible (de resumenes_chat) y los mensajes
+    más recientes de mensajes_chat posteriores a ese resumen.
 
     Returns:
         dict con claves:
@@ -110,12 +110,11 @@ def obtener_historial_con_resumen(chat_id: str, limite_mensajes: int = 8) -> dic
             - 'mensajes': list       → mensajes recientes (user/bot)
     """
     try:
-        # 1. Buscar el resumen más reciente
+        # 1. Buscar el resumen más reciente en la tabla dedicada
         res_summary = (
-            supabase.table("mensajes_chat")
-            .select("id, content, created_at")
+            supabase.table("resumenes_chat")
+            .select("content, created_at")
             .eq("chat_id", str(chat_id))
-            .eq("sender", "summary")
             .order("created_at", desc=True)
             .limit(1)
             .execute()
@@ -151,6 +150,9 @@ def obtener_historial_con_resumen(chat_id: str, limite_mensajes: int = 8) -> dic
 def contar_turnos_desde_ultimo_resumen(chat_id: str) -> int:
     """Cuenta cuántos mensajes user/bot hay desde el último resumen guardado.
 
+    Consulta la tabla dedicada resumenes_chat para obtener el timestamp
+    del último resumen.
+
     Args:
         chat_id: ID del chat de Telegram.
 
@@ -159,10 +161,9 @@ def contar_turnos_desde_ultimo_resumen(chat_id: str) -> int:
     """
     try:
         res_summary = (
-            supabase.table("mensajes_chat")
+            supabase.table("resumenes_chat")
             .select("created_at")
             .eq("chat_id", str(chat_id))
-            .eq("sender", "summary")
             .order("created_at", desc=True)
             .limit(1)
             .execute()
