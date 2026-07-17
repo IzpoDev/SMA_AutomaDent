@@ -42,6 +42,7 @@ def crear_paciente_y_historia(
     Returns:
         Mensaje de confirmación o error.
     """
+    # Verificar si ya está registrado como paciente
     existente = (
         supabase.table("pacientes")
         .select("id, nombre, apellido")
@@ -55,6 +56,21 @@ def crear_paciente_y_historia(
             f"{existente.data[0]['nombre']} {existente.data[0]['apellido']}."
         )
 
+    # Verificar que no es un miembro del personal (evitar duplicado entre tablas)
+    personal_existente = (
+        supabase.table("personal")
+        .select("id, nombre, apellido, rol")
+        .eq("telefono", telegram_chat_id)
+        .limit(1)
+        .execute()
+    )
+    if personal_existente.data:
+        p = personal_existente.data[0]
+        return (
+            f"⚠️ Este número de Telegram pertenece a {p['nombre']} {p['apellido']} ({p['rol']}) del personal de la clínica. "
+            f"El personal no puede registrarse como paciente."
+        )
+
     datos = {
         "nombre": nombre.strip().title(),
         "apellido": apellido.strip().title(),
@@ -65,9 +81,17 @@ def crear_paciente_y_historia(
     if fecha_nacimiento:
         datos["fecha_nacimiento"] = fecha_nacimiento
 
-    resultado = supabase.table("pacientes").insert(datos).execute()
-    paciente_id = resultado.data[0]["id"]
-    supabase.table("historias_clinicas").insert({"paciente_id": paciente_id}).execute()
+    try:
+        resultado = supabase.table("pacientes").insert(datos).execute()
+        if not resultado.data:
+            logger.error(f"[REGISTRO] Insert de paciente no retornó datos para chat_id={telegram_chat_id}")
+            return "❌ Error al guardar en la base de datos. Intenta nuevamente."
+        paciente_id = resultado.data[0]["id"]
+        supabase.table("historias_clinicas").insert({"paciente_id": paciente_id}).execute()
+        logger.info(f"[REGISTRO] ✅ Paciente creado: id={paciente_id} | {datos['nombre']} {datos['apellido']} | tel={telegram_chat_id}")
+    except Exception as e:
+        logger.error(f"[REGISTRO] Error insertando paciente: {e}")
+        return f"❌ Error al registrarte: {e}"
 
     return (
         f"✅ ¡Registro exitoso!\n"
@@ -106,17 +130,37 @@ def consultar_disponibilidad_agenda(
 
     query = (
         supabase.table("personal")
-        .select("id, nombre, apellido, especialidad")
-        .eq("rol", "odontologo")
+        .select("id, nombre, apellido, especialidad, rol")
     )
-    if especialidad:
-        query = query.ilike("especialidad", f"%{especialidad}%")
     odontologos = query.execute()
 
     if not odontologos.data:
+        return "❌ No se encontraron odontólogos en la base de datos."
+
+    # Filtrar odontólogos con especialidad y por término de búsqueda (nombre, apellido o especialidad)
+    odontologos_filtrados = []
+    for doc in odontologos.data:
+        doc_esp = doc.get("especialidad") or ""
+        doc_nombre = doc.get("nombre") or ""
+        doc_apellido = doc.get("apellido") or ""
+
+        if not doc_esp.strip():
+            continue
+
+        if especialidad:
+            term = especialidad.lower().strip()
+            if (term in doc_esp.lower() or 
+                term in doc_nombre.lower() or 
+                term in doc_apellido.lower() or 
+                term in f"{doc_nombre} {doc_apellido}".lower()):
+                odontologos_filtrados.append(doc)
+        else:
+            odontologos_filtrados.append(doc)
+
+    if not odontologos_filtrados:
         return (
-            f"❌ No se encontraron odontólogos"
-            f"{' con especialidad ' + especialidad if especialidad else ''}."
+            f"❌ No se encontraron odontólogos activos"
+            f"{' que coincidan con ' + especialidad if especialidad else ''}."
         )
 
     inicio_dia = datetime(
@@ -144,7 +188,13 @@ def consultar_disponibilidad_agenda(
     hora_actual = datetime.now(TIMEZONE) if fecha_obj == hoy else None
     todos_slots = []
 
-    for doc in odontologos.data:
+    for doc in odontologos_filtrados:
+        # Límite máximo de 3 citas al día por doctor
+        citas_hoy = len(ocupados.get(doc["id"], set()))
+        if citas_hoy >= 3:
+            logger.info(f"Dr(a). {doc['nombre']} {doc['apellido']} ya tiene {citas_hoy} citas y alcanzó el máximo diario.")
+            continue
+
         slots = []
         for h in range(HORARIO_INICIO, HORARIO_FIN):
             for m in range(0, 60, DURACION_CITA_MIN):
@@ -200,22 +250,56 @@ def agendar_cita(
 
     doctor = (
         supabase.table("personal")
-        .select("id, nombre, apellido")
+        .select("id, nombre, apellido, especialidad")
         .eq("id", odontologo_id)
-        .eq("rol", "odontologo")
         .limit(1)
         .execute()
     )
-    if not doctor.data:
+    if not doctor.data or not doctor.data[0].get("especialidad"):
         return f"❌ No se encontró un odontólogo con ID {odontologo_id}."
 
     try:
-        dt = datetime.fromisoformat(fecha_hora).replace(tzinfo=TIMEZONE)
+        dt_naive = datetime.fromisoformat(fecha_hora.replace("Z", "").split("+")[0].split("-05")[0])
+        # Si viene sin zona horaria, interpretar como hora local de Lima (Perú)
+        if dt_naive.tzinfo is None:
+            dt = dt_naive.replace(tzinfo=TIMEZONE)
+        else:
+            dt = dt_naive.astimezone(TIMEZONE)
     except ValueError:
-        return "❌ Formato inválido. Usa YYYY-MM-DDTHH:MM."
+        return "❌ Formato inválido. Usa YYYY-MM-DDTHH:MM (hora local Lima/Perú)."
 
     if dt <= datetime.now(TIMEZONE):
         return "❌ No puedes agendar citas en el pasado."
+
+    # Validaciones de disponibilidad
+    fecha_dt = dt.date()
+    inicio_dia = datetime(
+        fecha_dt.year, fecha_dt.month, fecha_dt.day, 0, 0, 0, tzinfo=TIMEZONE
+    ).isoformat()
+    fin_dia = datetime(
+        fecha_dt.year, fecha_dt.month, fecha_dt.day, 23, 59, 59, tzinfo=TIMEZONE
+    ).isoformat()
+
+    citas_existentes = (
+        supabase.table("citas")
+        .select("fecha_hora")
+        .eq("odontologo_id", odontologo_id)
+        .gte("fecha_hora", inicio_dia)
+        .lte("fecha_hora", fin_dia)
+        .in_("estado", ["programada", "confirmada"])
+        .execute()
+    )
+
+    # Límite máximo de 3 citas al día
+    if len(citas_existentes.data or []) >= 3:
+        return f"❌ El Dr(a). {doctor.data[0]['nombre']} {doctor.data[0]['apellido']} ya tiene el límite máximo de 3 citas programadas para el {fecha_dt.strftime('%d/%m/%Y')}."
+
+    # Evitar cruces de horario (misma hora exacta)
+    hora_buscada = dt.strftime("%Y-%m-%d %H:%M")
+    for c in (citas_existentes.data or []):
+        hora_cita = datetime.fromisoformat(c["fecha_hora"]).astimezone(TIMEZONE).strftime("%Y-%m-%d %H:%M")
+        if hora_cita == hora_buscada:
+            return f"❌ El Dr(a). {doctor.data[0]['nombre']} {doctor.data[0]['apellido']} ya tiene una cita reservada a las {dt.strftime('%H:%M')} el {fecha_dt.strftime('%d/%m/%Y')}."
 
     nueva_cita = (
         supabase.table("citas")

@@ -82,8 +82,8 @@ def registrar_evolucion_medica(
     Returns:
         Confirmación del registro de la evolución.
     """
-    if user_role != "odontologo":
-        return "❌ Solo los odontólogos pueden registrar evoluciones médicas."
+    if user_role not in ["odontologo", "administrador"]:
+        return "❌ Solo los odontólogos y administradores autorizados pueden registrar evoluciones médicas."
 
     cita = (
         supabase.table("citas")
