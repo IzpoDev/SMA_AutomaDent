@@ -17,6 +17,8 @@ from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
     MessageHandler,
+    CallbackQueryHandler,
+    ConversationHandler,
     filters,
     ContextTypes,
 )
@@ -26,7 +28,9 @@ from langchain_mcp_adapters.client import MultiServerMCPClient
 from src.agent.estado import set_mcp_tools
 from src.agent.ejecutor import procesar_mensaje
 from src.telegram.rbac import obtener_rol_usuario
+from src.telegram.panel_personal import start_personal, build_panel_conversation_handler
 from src.utils.config import TELEGRAM_TOKEN, MCP_SERVER_URL
+from src.utils.database import supabase
 from src.utils.helpers import sanitize_html
 from src.utils.logger import get_logger
 from src.utils.tracing import init_tracing
@@ -97,17 +101,30 @@ async def _wait_for_mcp_server(url: str, timeout: int = 20) -> None:
 # ==============================================================================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handler del comando /start. Saluda al usuario según su rol."""
+    """Handler del comando /start. Muestra el panel o el saludo según el rol del usuario."""
     chat_id = str(update.effective_chat.id)
     rol = await obtener_rol_usuario(chat_id)
 
     if rol in ["odontologo", "recepcionista", "administrador"]:
-        await update.message.reply_text(
-            f"🔑 <b>Sesión Administrativa Iniciada</b>\n\n"
-            f"Bienvenido(a) al bot interno de AutomaDent.\n"
-            f"👤 Rol detectado: <b>{rol.upper()}</b>",
-            parse_mode="HTML",
-        )
+        # Cargar nombre del personal y guardarlo en user_data para el panel
+        try:
+            personal_res = (
+                supabase.table("personal")
+                .select("nombre, apellido")
+                .eq("telefono", chat_id)
+                .limit(1)
+                .execute()
+            )
+            if personal_res.data:
+                p = personal_res.data[0]
+                context.user_data["nombre_personal"] = f"{p['nombre']} {p['apellido']}"
+            else:
+                context.user_data["nombre_personal"] = ""
+        except Exception:
+            context.user_data["nombre_personal"] = ""
+
+        context.user_data["rol"] = rol
+        await start_personal(update, context)
     else:
         await update.message.reply_text(
             "🦷 <b>¡Bienvenido a la Clínica Dental AutomaDent!</b>\n\n"
@@ -208,6 +225,11 @@ async def run_bot() -> None:
 
         # 4. Arrancar el bot de Telegram
         application = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+
+        # Panel interactivo para personal (ConversationHandler con botones)
+        panel_handler = build_panel_conversation_handler()
+        application.add_handler(panel_handler)
+
         application.add_handler(CommandHandler("start", start))
         application.add_handler(CommandHandler("help", help_command))
         application.add_handler(
