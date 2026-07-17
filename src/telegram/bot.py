@@ -15,10 +15,9 @@ from telegram import Update
 # pyrefly: ignore [missing-import]
 from telegram.ext import (
     ApplicationBuilder,
+    CallbackQueryHandler,
     CommandHandler,
     MessageHandler,
-    CallbackQueryHandler,
-    ConversationHandler,
     filters,
     ContextTypes,
 )
@@ -28,7 +27,12 @@ from langchain_mcp_adapters.client import MultiServerMCPClient
 from src.agent.estado import set_mcp_tools
 from src.agent.ejecutor import procesar_mensaje
 from src.telegram.rbac import obtener_rol_usuario
-from src.telegram.panel_personal import start_personal, build_panel_conversation_handler
+from src.telegram.panel_personal import (
+    start_personal,
+    handle_panel_callback,
+    handle_panel_texto,
+    ROLES_PERSONAL,
+)
 from src.utils.config import TELEGRAM_TOKEN, MCP_SERVER_URL
 from src.utils.database import supabase
 from src.utils.helpers import sanitize_html
@@ -167,13 +171,26 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handler de mensajes de texto. Delega al SMA y responde al usuario."""
+    """Handler de mensajes de texto.
+
+    Si el personal está en medio de un flujo del panel (panel_step activo),
+    el texto se redirige al panel en lugar del agente LLM.
+    Para todos los demás casos, delega al SMA.
+    """
     chat_id = str(update.effective_chat.id)
     texto = update.message.text
 
-    rol = await obtener_rol_usuario(chat_id)
-    logger.info(f"📩 {chat_id} | Rol: {rol} | '{texto[:40]}...'")
+    # Obtener rol: usar user_data si ya está cacheado para evitar una query extra
+    rol = context.user_data.get("rol") or await obtener_rol_usuario(chat_id)
 
+    # ── Panel de personal: interceptar texto si hay un flujo activo ──────────
+    if rol in ROLES_PERSONAL and context.user_data.get("panel_step"):
+        logger.info(f"📥 [PANEL] {chat_id} | step={context.user_data['panel_step']} | '{texto[:30]}'")
+        await handle_panel_texto(update, context)
+        return
+
+    # ── Flujo normal: agente LLM ─────────────────────────────────────────────
+    logger.info(f"📩 {chat_id} | Rol: {rol} | '{texto[:40]}...'")
     await update.effective_chat.send_action("typing")
 
     try:
@@ -226,9 +243,14 @@ async def run_bot() -> None:
         # 4. Arrancar el bot de Telegram
         application = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
-        # Panel interactivo para personal (ConversationHandler con botones)
-        panel_handler = build_panel_conversation_handler()
-        application.add_handler(panel_handler)
+        # Panel interactivo: CallbackQueryHandler directo (sin ConversationHandler)
+        # Captura botones: panel_*, estado_*, metodo_*
+        application.add_handler(
+            CallbackQueryHandler(
+                handle_panel_callback,
+                pattern=r"^(panel_|estado_|metodo_)",
+            )
+        )
 
         application.add_handler(CommandHandler("start", start))
         application.add_handler(CommandHandler("help", help_command))
