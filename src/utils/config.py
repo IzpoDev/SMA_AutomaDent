@@ -42,11 +42,11 @@ SUPABASE_KEY: str = os.environ.get("SUPABASE_SERVICE_KEY", "")
 # ─── Modelos LLM (cascada de fallback) ───────────────────────────────────────
 GEMINI_API_KEY: str = os.environ.get("GEMINI_API_KEY", "")
 MODEL_CASCADE: list[str] = [
-    "gemini-2.5-flash-lite",
-    "gemini-2.5-flash",
-    "antigravity",
+   "gemma-4-31b",
     "gemini-3.1-flash-lite",
     "gemini-3.5-flash",
+     "gemini-2.5-flash-lite",
+    "gemini-2.5-flash",
 ]
 MODEL_TEMPERATURE: float = 0.3
 
