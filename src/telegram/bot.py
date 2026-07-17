@@ -244,12 +244,9 @@ async def run_bot() -> None:
         application = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
         # Panel interactivo: CallbackQueryHandler directo (sin ConversationHandler)
-        # Captura botones: panel_*, estado_*, metodo_*
+        # Captura todos los botones del panel
         application.add_handler(
-            CallbackQueryHandler(
-                handle_panel_callback,
-                pattern=r"^(panel_|estado_|metodo_)",
-            )
+            CallbackQueryHandler(handle_panel_callback)
         )
 
         application.add_handler(CommandHandler("start", start))
@@ -259,7 +256,7 @@ async def run_bot() -> None:
         )
 
         async with application:
-            await application.updater.start_polling()
+            await application.updater.start_polling(allowed_updates=Update.ALL_TYPES)
             await application.start()
             logger.info("🤖 Bot AutomaDent iniciado en modo POLLING.")
 

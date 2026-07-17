@@ -210,80 +210,97 @@ async def handle_panel_callback(update: Update, context: ContextTypes.DEFAULT_TY
     No usa ConversationHandler. El estado se gestiona en context.user_data.
     """
     query = update.callback_query
-    await query.answer()  # Confirma el tap inmediatamente (evita el botón girando)
+    data  = query.data
+    chat_id = str(update.effective_chat.id) if update.effective_chat else "desconocido"
+    rol   = context.user_data.get("rol", "administrador")
 
-    data    = query.data
-    chat_id = str(update.effective_chat.id)
-    rol     = context.user_data.get("rol", "administrador")
+    logger.info(f"🔮 [CALLBACK RECIBIDO] chat_id={chat_id} | rol={rol} | data='{data}'")
 
-    # ── Menú principal ────────────────────────────────────────────────────────
-    if data == "panel_menu":
-        _clear_step(context)
-        await query.edit_message_text(
-            "🔑 <b>Panel de Personal — AutomaDent</b>\n\n¿Qué deseas hacer?",
-            parse_mode="HTML",
-            reply_markup=_MENU_KEYBOARD,
-        )
-        return
+    try:
+        await query.answer()  # Confirma el tap inmediatamente (evita el botón girando)
 
-    # ── Ver citas de hoy ─────────────────────────────────────────────────────
-    if data == "panel_ver_citas":
-        texto = _listar_citas_hoy(chat_id, rol)
-        await query.edit_message_text(
-            texto, parse_mode="HTML", reply_markup=_back_keyboard()
-        )
-        return
+        # ── Menú principal ────────────────────────────────────────────────────────
+        if data == "panel_menu":
+            _clear_step(context)
+            await query.edit_message_text(
+                "🔑 <b>Panel de Personal — AutomaDent</b>\n\n¿Qué deseas hacer?",
+                parse_mode="HTML",
+                reply_markup=_MENU_KEYBOARD,
+            )
+            return
 
-    # ── Iniciar flujo: Actualizar estado ─────────────────────────────────────
-    if data == "panel_actualizar_cita":
-        _set_step(context, STEP_ACT_CITA_ID)
-        await query.edit_message_text(
-            "✏️ <b>Actualizar Estado de Cita</b>\n\n"
-            "Escríbeme el <b>ID de la cita</b> que deseas actualizar:",
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("« Cancelar", callback_data="panel_menu")
-            ]]),
-        )
-        return
+        # ── Ver citas de hoy ─────────────────────────────────────────────────────
+        if data == "panel_ver_citas":
+            logger.info(f"📅 [PANEL] Procesando ver citas para chat_id={chat_id}")
+            texto = _listar_citas_hoy(chat_id, rol)
+            await query.edit_message_text(
+                texto, parse_mode="HTML", reply_markup=_back_keyboard()
+            )
+            return
 
-    # ── Iniciar flujo: Registrar pago ─────────────────────────────────────────
-    if data == "panel_registrar_pago":
-        _set_step(context, STEP_PAG_CITA_ID)
-        await query.edit_message_text(
-            "💳 <b>Registrar Pago</b>\n\n"
-            "Escríbeme el <b>ID de la cita</b> a cobrar:\n"
-            "<i>(La cita debe estar en estado 'asistida')</i>",
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("« Cancelar", callback_data="panel_menu")
-            ]]),
-        )
-        return
+        # ── Iniciar flujo: Actualizar estado ─────────────────────────────────────
+        if data == "panel_actualizar_cita":
+            _set_step(context, STEP_ACT_CITA_ID)
+            await query.edit_message_text(
+                "✏️ <b>Actualizar Estado de Cita</b>\n\n"
+                "Escríbeme el <b>ID de la cita</b> que deseas actualizar:",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("« Cancelar", callback_data="panel_menu")
+                ]]),
+            )
+            return
 
-    # ── Iniciar flujo: Mensaje final ──────────────────────────────────────────
-    if data == "panel_mensaje_final":
-        _set_step(context, STEP_MSG_CITA_ID)
-        await query.edit_message_text(
-            "📨 <b>Mensaje Final al Paciente</b>\n\n"
-            "Escríbeme el <b>ID de la cita</b> cuyo paciente recibirá\n"
-            "el mensaje de finalización:",
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("« Cancelar", callback_data="panel_menu")
-            ]]),
-        )
-        return
+        # ── Iniciar flujo: Registrar pago ─────────────────────────────────────────
+        if data == "panel_registrar_pago":
+            _set_step(context, STEP_PAG_CITA_ID)
+            await query.edit_message_text(
+                "💳 <b>Registrar Pago</b>\n\n"
+                "Escríbeme el <b>ID de la cita</b> a cobrar:\n"
+                "<i>(La cita debe estar en estado 'asistida')</i>",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("« Cancelar", callback_data="panel_menu")
+                ]]),
+            )
+            return
 
-    # ── Selección de nuevo estado (flujo actualizar) ──────────────────────────
-    if data.startswith("estado_"):
-        await _aplicar_nuevo_estado(query, context, chat_id, rol, data)
-        return
+        # ── Iniciar flujo: Mensaje final ──────────────────────────────────────────
+        if data == "panel_mensaje_final":
+            _set_step(context, STEP_MSG_CITA_ID)
+            await query.edit_message_text(
+                "📨 <b>Mensaje Final al Paciente</b>\n\n"
+                "Escríbeme el <b>ID de la cita</b> cuyo paciente recibirá\n"
+                "el mensaje de finalización:",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("« Cancelar", callback_data="panel_menu")
+                ]]),
+            )
+            return
 
-    # ── Selección de método de pago (flujo pago) ──────────────────────────────
-    if data.startswith("metodo_"):
-        await _aplicar_pago(query, context, chat_id, rol, data)
-        return
+        # ── Selección de nuevo estado (flujo actualizar) ──────────────────────────
+        if data.startswith("estado_"):
+            logger.info(f"✏️ [PANEL] Aplicando nuevo estado: {data}")
+            await _aplicar_nuevo_estado(query, context, chat_id, rol, data)
+            return
+
+        # ── Selección de método de pago (flujo pago) ──────────────────────────────
+        if data.startswith("metodo_"):
+            logger.info(f"💳 [PANEL] Aplicando pago método: {data}")
+            await _aplicar_pago(query, context, chat_id, rol, data)
+            return
+
+    except Exception as e:
+        logger.error(f"❌ [CALLBACK ERROR] Error procesando callback data='{data}': {e}", exc_info=True)
+        try:
+            await query.edit_message_text(
+                f"⚠️ Ocurrió un error al procesar la solicitud: <code>{e}</code>",
+                parse_mode="HTML",
+                reply_markup=_back_keyboard()
+            )
+        except Exception as e2:
+            logger.error(f"❌ [CALLBACK ERROR] No se pudo enviar mensaje de error: {e2}")
 
 
 # ==============================================================================
