@@ -1,5 +1,6 @@
 services:
   mcp-server:
+    container_name: mcp-dent
     build:
       context: .
       dockerfile: docker/Dockerfile.mcp
@@ -12,6 +13,7 @@ services:
       - general-network
 
   api:
+    container_name: api-dent
     build:
       context: .
       dockerfile: docker/Dockerfile.api
@@ -24,6 +26,7 @@ services:
       - general-network
 
   bot:
+    container_name: bot-dent
     build:
       context: .
       dockerfile: docker/Dockerfile.bot
@@ -36,6 +39,7 @@ services:
       - general-network
 
   dashboard:
+    container_name: dashboard-dent
     build:
       context: .
       dockerfile: docker/Dockerfile.dashboard
