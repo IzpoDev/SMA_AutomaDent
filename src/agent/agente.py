@@ -8,8 +8,8 @@
 from datetime import datetime
 
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
+# pyrefly: ignore [missing-import]
 from langgraph.graph import StateGraph, START, END
-
 from src.agent.estado import (
     AgentState,
     router,
@@ -27,6 +27,7 @@ from src.prompts.agente_prompts import (
     PROMPT_ASISTENTE_MEDICO,
     PROMPT_FACTURACION,
 )
+from langsmith import traceable
 
 logger = get_logger(__name__)
 
@@ -35,6 +36,7 @@ logger = get_logger(__name__)
 #  NODOS DEL GRAFO
 # ==============================================================================
 
+@traceable(name="Nodo::Supervisor", run_type="chain")
 def supervisor_node(state: AgentState) -> dict:
     """Nodo Supervisor: clasifica la intención y delega al subagente correcto.
 
@@ -73,6 +75,7 @@ def supervisor_node(state: AgentState) -> dict:
         }
 
 
+@traceable(name="Nodo::Recepcion", run_type="chain")
 async def recepcion_node(state: AgentState) -> dict:
     """Nodo Recepción: gestiona registro, disponibilidad, agendamiento e historial.
 
@@ -125,6 +128,7 @@ async def recepcion_node(state: AgentState) -> dict:
     return {"messages": [response], "next_agent": "FINISH"}
 
 
+@traceable(name="Nodo::AsistenteMedico", run_type="chain")
 async def medico_node(state: AgentState) -> dict:
     """Nodo Asistente Médico: gestiona citas, evoluciones e historial clínico.
 
@@ -174,6 +178,7 @@ async def medico_node(state: AgentState) -> dict:
     return {"messages": [response], "next_agent": "FINISH"}
 
 
+@traceable(name="Nodo::Facturacion", run_type="chain")
 async def facturacion_node(state: AgentState) -> dict:
     """Nodo Facturación: gestiona el registro de pagos.
 

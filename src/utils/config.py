@@ -75,3 +75,9 @@ DASHBOARD_PASSWORD: str = os.environ.get("DASHBOARD_PASSWORD", "dent123")
 # ─── Logging ─────────────────────────────────────────────────────────────────
 LOG_LEVEL: str = os.environ.get("LOG_LEVEL", "INFO")
 LOG_DIR: str = os.environ.get("LOG_DIR", "./logs")
+
+# ─── LangSmith Observability ─────────────────────────────────────────────────
+LANGSMITH_API_KEY: str = os.environ.get("LANGSMITH_API_KEY", "")
+LANGSMITH_PROJECT: str = os.environ.get("LANGSMITH_PROJECT", "AutomaDent-SMA")
+LANGSMITH_ENDPOINT: str = os.environ.get("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com")
+LANGSMITH_TRACING: bool = os.environ.get("LANGSMITH_TRACING", "false").lower() == "true"

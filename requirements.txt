@@ -12,6 +12,7 @@ langgraph
 langchain-mcp-adapters
 google-genai
 mcp[cli]
+langsmith
 
 # Telegram
 python-telegram-bot

@@ -13,6 +13,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.utils.config import CORS_ORIGINS
+from src.utils.tracing import init_tracing
 from src.api.rutas.auth import router as auth_router
 from src.api.rutas.usuarios import router as usuarios_router
 from src.api.rutas.personal import router as personal_router
@@ -20,6 +21,9 @@ from src.api.rutas.pacientes import router as pacientes_router
 from src.api.rutas.historias import router as historias_router
 from src.api.rutas.citas import router as citas_router
 from src.api.rutas.pagos import router as pagos_router
+
+# ─── LangSmith Tracing ───────────────────────────────────────────────────────
+init_tracing()
 
 # ─── Aplicación ───────────────────────────────────────────────────────────────
 app = FastAPI(

@@ -18,6 +18,7 @@ from src.utils.database import (
 )
 from src.utils.helpers import get_text_content
 from src.utils.logger import get_logger
+from langsmith import traceable
 
 logger = get_logger(__name__)
 
@@ -26,6 +27,10 @@ _RESPUESTA_ERROR = (
 )
 
 
+@traceable(
+    name="AutomaDent::procesar_mensaje",
+    run_type="chain",
+)
 async def procesar_mensaje(
     telegram_chat_id: str,
     user_role: str,
@@ -93,12 +98,21 @@ async def procesar_mensaje(
 
     # 5. Invocar al grafo multiagente con todo el contexto
     try:
-        result = await app.ainvoke({
-            "messages": messages_list,
-            "next_agent": "supervisor",
-            "telegram_chat_id": telegram_chat_id,
-            "user_role": user_role,
-        })
+        result = await app.ainvoke(
+            {
+                "messages": messages_list,
+                "next_agent": "supervisor",
+                "telegram_chat_id": telegram_chat_id,
+                "user_role": user_role,
+            },
+            config={
+                "metadata": {
+                    "telegram_chat_id": telegram_chat_id,
+                    "user_role": user_role,
+                },
+                "tags": [f"role:{user_role}", "sma:automadent"],
+            },
+        )
     except Exception as e:
         logger.error(f"Error invocando el grafo SMA: {e}", exc_info=True)
         guardar_mensaje(telegram_chat_id, "user", mensaje)

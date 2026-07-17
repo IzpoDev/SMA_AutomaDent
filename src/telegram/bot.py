@@ -12,6 +12,7 @@ import subprocess
 
 import httpx
 from telegram import Update
+# pyrefly: ignore [missing-import]
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -19,6 +20,7 @@ from telegram.ext import (
     filters,
     ContextTypes,
 )
+# pyrefly: ignore [missing-import]
 from langchain_mcp_adapters.client import MultiServerMCPClient
 
 from src.agent.estado import set_mcp_tools
@@ -27,6 +29,7 @@ from src.telegram.rbac import obtener_rol_usuario
 from src.utils.config import TELEGRAM_TOKEN, MCP_SERVER_URL
 from src.utils.helpers import sanitize_html
 from src.utils.logger import get_logger
+from src.utils.tracing import init_tracing
 
 logger = get_logger(__name__)
 
@@ -179,6 +182,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 async def run_bot() -> None:
     """Arranca el servidor MCP, conecta, carga herramientas y lanza el bot."""
     global _mcp_process
+
+    # 0. Inicializar LangSmith tracing (observabilidad)
+    init_tracing()
 
     # 1. Arrancar el servidor MCP como subproceso
     _mcp_process = _start_mcp_server()
