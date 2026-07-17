@@ -19,6 +19,7 @@ from telegram.ext import ContextTypes
 
 from src.utils.database import supabase
 from src.utils.config import TIMEZONE
+from src.telegram.rbac import obtener_rol_usuario
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -212,9 +213,16 @@ async def handle_panel_callback(update: Update, context: ContextTypes.DEFAULT_TY
     query = update.callback_query
     data  = query.data
     chat_id = str(update.effective_chat.id) if update.effective_chat else "desconocido"
-    rol   = context.user_data.get("rol", "administrador")
+
+    # Consultar siempre en tiempo real el rol en la base de datos
+    rol = await obtener_rol_usuario(chat_id)
 
     logger.info(f"🔮 [CALLBACK RECIBIDO] chat_id={chat_id} | rol={rol} | data='{data}'")
+
+    if rol not in ROLES_PERSONAL:
+        logger.warning(f"⚠️ [PANEL] Intento de acceso no autorizado de chat_id={chat_id} con rol={rol}")
+        await query.answer("Acceso denegado: no eres miembro del personal de la clínica.", show_alert=True)
+        return
 
     try:
         await query.answer()  # Confirma el tap inmediatamente (evita el botón girando)

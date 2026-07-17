@@ -30,6 +30,7 @@ def _build_llm(model_name: str, temperature: float = MODEL_TEMPERATURE) -> ChatG
         google_api_key=GEMINI_API_KEY,
         temperature=temperature,
         convert_system_message_to_human=False,
+        max_retries=0,
     )
 
 
@@ -38,21 +39,11 @@ def invocar_llm_con_fallback(
     tools: list = None,
     temperature: float = MODEL_TEMPERATURE,
 ):
-    """Invoca el LLM con cascada de modelos para manejar límites de cuota (RPM/RPD).
+    """Invoca el LLM con cascada de modelos.
 
-    Intenta cada modelo de MODEL_CASCADE en orden. Si recibe un error 429
-    (cuota agotada), espera brevemente y pasa al siguiente modelo.
-
-    Args:
-        messages: Lista de mensajes LangChain (SystemMessage, HumanMessage, AIMessage).
-        tools: Lista de herramientas a vincular al LLM (opcional).
-        temperature: Temperatura de generación.
-
-    Returns:
-        Respuesta AIMessage del primer modelo que responda exitosamente.
-
-    Raises:
-        Exception: Si todos los modelos del cascade fallan.
+    Intenta cada modelo de MODEL_CASCADE en orden. Si recibe cualquier excepción
+    (cuota 429, no disponible 503, error de red, etc.), registra el aviso y
+    pasa al siguiente modelo de forma inmediata.
     """
     last_exc = None
     for model_name in MODEL_CASCADE:
@@ -62,16 +53,14 @@ def invocar_llm_con_fallback(
                 candidate = candidate.bind_tools(tools)
             response = candidate.invoke(messages)
             if model_name != MODEL_CASCADE[0]:
-                logger.info(f"[FALLBACK] Respondió con modelo: {model_name}")
+                logger.info(f"[FALLBACK] Respondió exitosamente con modelo: {model_name}")
             return response
         except Exception as e:
-            err_str = str(e).lower()
-            if "429" in err_str or "quota" in err_str or "resource_exhausted" in err_str:
-                logger.warning(f"[FALLBACK] Cuota agotada en {model_name}, probando siguiente...")
-                time.sleep(1)
-                last_exc = e
-            else:
-                raise  # Error no relacionado a cuota → relanzar
+            logger.warning(
+                f"[FALLBACK] Falló modelo '{model_name}': {e}. Probando el siguiente..."
+            )
+            last_exc = e
+            time.sleep(0.5)  # Breve pausa antes de reintentar con el siguiente
     raise last_exc or Exception("Todos los modelos del cascade fallaron.")
 
 
@@ -80,19 +69,7 @@ async def invocar_llm_con_fallback_async(
     tools: list = None,
     temperature: float = MODEL_TEMPERATURE,
 ):
-    """Versión asíncrona de invocar_llm_con_fallback.
-
-    Args:
-        messages: Lista de mensajes LangChain.
-        tools: Lista de herramientas a vincular (opcional).
-        temperature: Temperatura de generación.
-
-    Returns:
-        Respuesta AIMessage del primer modelo que responda exitosamente.
-
-    Raises:
-        Exception: Si todos los modelos del cascade fallan.
-    """
+    """Versión asíncrona de invocar_llm_con_fallback."""
     last_exc = None
     for model_name in MODEL_CASCADE:
         try:
@@ -101,14 +78,12 @@ async def invocar_llm_con_fallback_async(
                 candidate = candidate.bind_tools(tools)
             response = await candidate.ainvoke(messages)
             if model_name != MODEL_CASCADE[0]:
-                logger.info(f"[FALLBACK] Respondió con modelo: {model_name}")
+                logger.info(f"[FALLBACK] Respondió exitosamente con modelo: {model_name}")
             return response
         except Exception as e:
-            err_str = str(e).lower()
-            if "429" in err_str or "quota" in err_str or "resource_exhausted" in err_str:
-                logger.warning(f"[FALLBACK] Cuota agotada en {model_name}, probando siguiente...")
-                await asyncio.sleep(1)
-                last_exc = e
-            else:
-                raise
+            logger.warning(
+                f"[FALLBACK] Falló modelo '{model_name}': {e}. Probando el siguiente..."
+            )
+            last_exc = e
+            await asyncio.sleep(0.5)
     raise last_exc or Exception("Todos los modelos del cascade fallaron.")

@@ -11,6 +11,7 @@
 import os
 from google import genai
 from google.genai import types as genai_types
+# pyrefly: ignore [missing-import]
 from supabase import create_client, Client
 
 from src.utils.config import (

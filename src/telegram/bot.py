@@ -180,8 +180,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     chat_id = str(update.effective_chat.id)
     texto = update.message.text
 
-    # Obtener rol: usar user_data si ya está cacheado para evitar una query extra
-    rol = context.user_data.get("rol") or await obtener_rol_usuario(chat_id)
+    # Obtener rol: consultar en tiempo real directamente de la base de datos
+    rol = await obtener_rol_usuario(chat_id)
 
     # ── Panel de personal: interceptar texto si hay un flujo activo ──────────
     if rol in ROLES_PERSONAL and context.user_data.get("panel_step"):
