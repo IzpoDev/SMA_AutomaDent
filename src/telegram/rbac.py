@@ -31,20 +31,20 @@ async def obtener_rol_usuario(chat_id: str) -> str:
             supabase.table("personal")
             .select("rol")
             .eq("telefono", chat_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
-        if personal_res.data:
-            return personal_res.data["rol"]
+        if hasattr(personal_res, 'data') and len(personal_res.data) > 0:
+            return personal_res.data[0]["rol"]
 
         pacientes_res = (
             supabase.table("pacientes")
             .select("id")
             .eq("telefono", chat_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
-        if pacientes_res.data:
+        if hasattr(pacientes_res, 'data') and len(pacientes_res.data) > 0:
             return "paciente"
 
         return _ROL_DEFAULT
